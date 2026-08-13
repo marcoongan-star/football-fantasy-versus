@@ -21,7 +21,7 @@ test("server-renders the public FFV recruiter demo", async () => {
   assert.match(html, /Fantasy football that/);
   assert.match(html, /Recruiter demo · seeded data/);
   assert.match(html, /The Gegenpress Society/);
-  assert.match(html, /Every layer has one job/);
+  assert.doesNotMatch(html, /Every layer has one job|View system design|Architecture/);
   assert.doesNotMatch(html, /Your site is taking shape|Building your site/);
 });
 
@@ -33,4 +33,3 @@ test("labels demonstration data and preserves no-login access", async () => {
   assert.match(html, /Explore demo league/);
   assert.match(html, /No affiliation with FPL, FotMob, StatsBomb/);
 });
-

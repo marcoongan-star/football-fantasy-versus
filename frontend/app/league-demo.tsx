@@ -29,7 +29,6 @@ export function LeagueDemo() {
         <nav aria-label="Primary navigation">
           <a className="nav-link active" href="#league">League</a>
           <a className="nav-link" href="#modes">How it works</a>
-          <a className="nav-link" href="#architecture">Architecture</a>
         </nav>
         <button className="button ghost" onClick={() => setShowJoin(true)}>Join a league</button>
       </header>
@@ -46,7 +45,6 @@ export function LeagueDemo() {
             </p>
             <div className="hero-actions">
               <a className="button primary" href="#league">Explore demo league <span>→</span></a>
-              <a className="text-link" href="#architecture">View system design</a>
             </div>
           </div>
           <div className="hero-scorecard" aria-label="Career mode result preview">
@@ -120,14 +118,6 @@ export function LeagueDemo() {
         )}
       </section>
 
-      <section className="architecture" id="architecture">
-        <div><span className="overline light">BUILT TO BE EXPLAINED</span><h2>Every layer has one job.</h2><p>The interface presents state. FastAPI enforces football rules. PostgreSQL protects the truth. Redis makes live moments feel instant without becoming the only copy of anything important.</p></div>
-        <div className="flow" aria-label="System architecture">
-          <FlowNode label="Next.js" detail="Interface" /><span>→</span><FlowNode label="FastAPI" detail="Domain rules" /><span>→</span><FlowNode label="PostgreSQL" detail="Source of truth" />
-          <div className="redis-node">↕ Redis · live events & coordination</div>
-        </div>
-      </section>
-
       <footer><span>FFV is an independent educational project.</span><span>No affiliation with FPL, FotMob, StatsBomb, or the Premier League.</span></footer>
 
       {showJoin && (
@@ -149,8 +139,4 @@ export function LeagueDemo() {
 
 function Rule({ number, label, detail }: { number: string; label: string; detail: string }) {
   return <article className="rule-card"><strong>{number}</strong><h3>{label}</h3><p>{detail}</p></article>;
-}
-
-function FlowNode({ label, detail }: { label: string; detail: string }) {
-  return <div className="flow-node"><strong>{label}</strong><small>{detail}</small></div>;
 }
