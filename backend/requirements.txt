@@ -1,1 +1,6 @@
-m«ëˆ§½©buªàºg§µ¶œ‘éİş·ªº*Ş™éí²ÜmRÆ y¶¬{®vçºh¢ø¥zŠ.µø¥y¶ëy©­æ¤zw(uçhºÚn¶êbÚ%Šw¬¡ù^aéƒu×œ¡×yÊz)éºØazZ]ŠÊek+aŠÉ²Æ z(§¦ëb›­~)^uçÚº[_¢»-v)è¢ëiºÚ.¶›­~)^uçÚº[_¢»-v‹­
+fastapi==0.116.1
+pydantic==2.11.7
+psycopg[binary]==3.2.9
+sqlalchemy==2.0.41
+uvicorn[standard]==0.35.0
+

@@ -1,1 +1,13 @@
-m«ëˆ§½©buªàºg§µúè×§wö©§úZëlÅKæÚ±î¸Ø[é¢Šwâ•ê(º×â•æÛ­æ¤n·š‘éÜ¡×¢ëiºÛ©Š{h–)Ş²‡åzx-†{¦×^r‡^uç(uè§¦ëa…éiv+)•¬­†+&zËè¢›­Šznµø¥y×Ÿjém~ŠìµØ§¢‹­¦ëhºÚnµø¥y×Ÿjém~ŠìµÚ.
+import type { Metadata } from "next";
+import { LeagueDemo } from "./league-demo";
+
+export const metadata: Metadata = {
+  title: "FFV â€” Football Fantasy Versus",
+  description:
+    "A transparent fantasy-football platform with a separate, reproducible career simulation.",
+};
+
+export default function Home() {
+  return <LeagueDemo />;
+}
+

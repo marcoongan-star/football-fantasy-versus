@@ -1,1 +1,258 @@
-m«ëˆ§½©buªàºg§µ¶œ‘éÝýªiþÇ«¾'²œ”±¨m«ë€Ý…¹îš(§~)^¢‹­~)^mºÞjFëy©ÊyÚ.¶›­º˜§¶‰bë(~W§‚Øgº`Ýuç(uç^r‡^Šzn¶^–—b²™ZÊØb²g¬±¨Š)éºØ§¦ë_ŠWyö®–×è®Ë]Šz(ºÚn¶‹­¦ë_ŠWyö®–×è®Ë]¢ë
+from __future__ import annotations
+
+import hashlib
+import secrets
+from dataclasses import dataclass
+
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from .auth import Principal
+from .models import AuditEvent, League, LeagueMember, User, utc_now
+
+
+@dataclass
+class DomainError(Exception):
+    message: str
+    status_code: int
+    code: str
+
+
+def _new_invite_code() -> str:
+    token = secrets.token_hex(5).upper()
+    return f"FFV-{token[:5]}-{token[5:]}"
+
+
+def _hash_invite(code: str) -> str:
+    return hashlib.sha256(code.strip().upper().encode("utf-8")).hexdigest()
+
+
+def get_or_create_user(session: Session, principal: Principal) -> User:
+    user = session.scalar(
+        select(User).where(
+            User.auth_provider == principal.provider,
+            User.provider_subject == principal.subject,
+        )
+    )
+    if user is None:
+        user = User(
+            email=principal.email,
+            display_name=principal.display_name,
+            auth_provider=principal.provider,
+            provider_subject=principal.subject,
+        )
+        session.add(user)
+        session.flush()
+    else:
+        user.email = principal.email
+        user.display_name = principal.display_name
+    return user
+
+
+def create_league(session: Session, principal: Principal, name: str) -> tuple[League, str]:
+    user = get_or_create_user(session, principal)
+    invite_code = _new_invite_code()
+    league = League(
+        name=name.strip(),
+        commissioner_user_id=user.id,
+        max_members=15,
+        invite_code_hash=_hash_invite(invite_code),
+    )
+    session.add(league)
+    session.flush()
+    session.add(
+        LeagueMember(
+            league_id=league.id,
+            user_id=user.id,
+            role="commissioner",
+            status="active",
+        )
+    )
+    session.add(
+        AuditEvent(
+            league_id=league.id,
+            actor_user_id=user.id,
+            subject_user_id=user.id,
+            event_type="league.created",
+            detail="League created with a 15-manager capacity.",
+        )
+    )
+    session.flush()
+    return league, invite_code
+
+
+def join_league(session: Session, principal: Principal, invite_code: str) -> League:
+    user = get_or_create_user(session, principal)
+    league = session.scalar(
+        select(League)
+        .where(League.invite_code_hash == _hash_invite(invite_code))
+        .with_for_update()
+    )
+    if league is None or not league.invite_enabled:
+        raise DomainError("This invite is invalid or has been revoked.", 404, "invite_invalid")
+
+    membership = session.scalar(
+        select(LeagueMember).where(
+            LeagueMember.league_id == league.id,
+            LeagueMember.user_id == user.id,
+        )
+    )
+    if membership is not None:
+        if membership.status == "removed":
+            raise DomainError(
+                "The commissioner must restore this membership before you can rejoin.",
+                403,
+                "membership_removed",
+            )
+        return league
+
+    active_count = session.scalar(
+        select(func.count(LeagueMember.id)).where(
+            LeagueMember.league_id == league.id,
+            LeagueMember.status == "active",
+        )
+    )
+    if int(active_count or 0) >= league.max_members:
+        raise DomainError("This league already has 15 managers.", 409, "league_full")
+
+    session.add(LeagueMember(league_id=league.id, user_id=user.id))
+    session.add(
+        AuditEvent(
+            league_id=league.id,
+            actor_user_id=user.id,
+            subject_user_id=user.id,
+            event_type="member.joined",
+            detail="Manager joined with a reusable invite code.",
+        )
+    )
+    session.flush()
+    return league
+
+
+def require_commissioner(session: Session, league_id: str, principal: Principal) -> tuple[League, User]:
+    user = get_or_create_user(session, principal)
+    league = session.scalar(select(League).where(League.id == league_id).with_for_update())
+    if league is None:
+        raise DomainError("League not found.", 404, "league_not_found")
+    if league.commissioner_user_id != user.id:
+        raise DomainError("Only the commissioner can do that.", 403, "commissioner_required")
+    return league, user
+
+
+def require_active_member(session: Session, league_id: str, principal: Principal) -> LeagueMember:
+    user = session.scalar(
+        select(User).where(
+            User.auth_provider == principal.provider,
+            User.provider_subject == principal.subject,
+        )
+    )
+    if user is None:
+        raise DomainError("You are not an active member of this league.", 403, "membership_required")
+    membership = session.scalar(
+        select(LeagueMember).where(
+            LeagueMember.league_id == league_id,
+            LeagueMember.user_id == user.id,
+            LeagueMember.status == "active",
+        )
+    )
+    if membership is None:
+        raise DomainError("You are not an active member of this league.", 403, "membership_required")
+    return membership
+
+
+def rotate_invite(session: Session, league_id: str, principal: Principal) -> tuple[League, str]:
+    league, commissioner = require_commissioner(session, league_id, principal)
+    invite_code = _new_invite_code()
+    league.invite_code_hash = _hash_invite(invite_code)
+    league.invite_enabled = True
+    league.invite_version += 1
+    session.add(
+        AuditEvent(
+            league_id=league.id,
+            actor_user_id=commissioner.id,
+            event_type="invite.rotated",
+            detail=f"Invite rotated to version {league.invite_version}.",
+        )
+    )
+    session.flush()
+    return league, invite_code
+
+
+def revoke_invite(session: Session, league_id: str, principal: Principal) -> League:
+    league, commissioner = require_commissioner(session, league_id, principal)
+    league.invite_enabled = False
+    session.add(
+        AuditEvent(
+            league_id=league.id,
+            actor_user_id=commissioner.id,
+            event_type="invite.revoked",
+            detail=f"Invite version {league.invite_version} was revoked.",
+        )
+    )
+    return league
+
+
+def remove_member(
+    session: Session, league_id: str, member_user_id: str, principal: Principal
+) -> LeagueMember:
+    league, commissioner = require_commissioner(session, league_id, principal)
+    if member_user_id == commissioner.id:
+        raise DomainError("A commissioner cannot remove themselves.", 409, "commissioner_removal")
+    member = session.scalar(
+        select(LeagueMember).where(
+            LeagueMember.league_id == league.id,
+            LeagueMember.user_id == member_user_id,
+        )
+    )
+    if member is None:
+        raise DomainError("Member not found.", 404, "member_not_found")
+    if member.status == "active":
+        member.status = "removed"
+        member.removed_at = utc_now()
+        member.removed_by_user_id = commissioner.id
+        session.add(
+            AuditEvent(
+                league_id=league.id,
+                actor_user_id=commissioner.id,
+                subject_user_id=member.user_id,
+                event_type="member.removed",
+                detail="Membership was disabled; historical activity was retained.",
+            )
+        )
+    return member
+
+
+def restore_member(
+    session: Session, league_id: str, member_user_id: str, principal: Principal
+) -> LeagueMember:
+    league, commissioner = require_commissioner(session, league_id, principal)
+    member = session.scalar(
+        select(LeagueMember).where(
+            LeagueMember.league_id == league.id,
+            LeagueMember.user_id == member_user_id,
+        )
+    )
+    if member is None:
+        raise DomainError("Member not found.", 404, "member_not_found")
+    active_count = session.scalar(
+        select(func.count(LeagueMember.id)).where(
+            LeagueMember.league_id == league.id,
+            LeagueMember.status == "active",
+        )
+    )
+    if member.status == "removed" and int(active_count or 0) >= league.max_members:
+        raise DomainError("This league already has 15 managers.", 409, "league_full")
+    if member.status == "removed":
+        member.status = "active"
+        member.removed_at = None
+        member.removed_by_user_id = None
+        session.add(
+            AuditEvent(
+                league_id=league.id,
+                actor_user_id=commissioner.id,
+                subject_user_id=member.user_id,
+                event_type="member.restored",
+                detail="Commissioner restored the membership.",
+            )
+        )
+    return member

@@ -1,1 +1,27 @@
-m«ëˆ§½©buªàºg§µ¶œ‘éÝþœ©®ˆÞrÛhšU,j›jÇºà7an{¦Š)ßŠW¨¢ë_ŠW›n·š‘ºÞjG§r‡^v‹­¦ën¦)í¢X§zÊ•éà¶î˜7]yÊy×œ¡×¢ž›­†¥¥Ø¬¦V²¶¬™ë,j¢Šzn¶)éº×â•ç^}«¥µú+²×bžŠ.¶›­¢ëiº×â•ç^}«¥µú+²×hº
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ffv-api"
+version = "0.1.0"
+description = "League and simulation domain API for Football Fantasy Versus"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi==0.116.1",
+  "pydantic==2.11.7",
+  "psycopg[binary]==3.2.9",
+  "sqlalchemy==2.0.41",
+  "uvicorn[standard]==0.35.0",
+]
+
+[project.optional-dependencies]
+test = [
+  "httpx==0.28.1",
+  "pytest==8.4.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
