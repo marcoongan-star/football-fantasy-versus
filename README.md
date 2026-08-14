@@ -88,6 +88,7 @@ docs/       Product decisions, data flows, and milestone explanations
 - Private league creation, reusable invites, commissioner controls, and a 15-manager limit.
 - Soft member removal with retained history and auditable actions.
 - Durable snake-draft sessions with stable seats, alternating round order, turn validation, and unique player ownership.
+- Interactive, resettable public draft preview that makes the snake-order reversal visible without requiring login.
 - Eight backend tests plus frontend lint, build, and rendered-page checks.
 
 ## Where to make common edits
@@ -96,7 +97,7 @@ The public page is intentionally concentrated in a few files so a new contributo
 
 | What you want to change | File |
 | --- | --- |
-| Public page words and seeded demo content | `frontend/app/league-demo.tsx` |
+| Public page words, seeded players, managers, and demo content | `frontend/app/league-demo.tsx` |
 | Colors, spacing, and responsive layout | `frontend/app/globals.css` |
 | Browser title and social sharing metadata | `frontend/app/layout.tsx` |
 | League and draft API routes | `backend/app/main.py` |
@@ -128,7 +129,7 @@ Then open `http://localhost:3000`. API documentation is at `http://localhost:800
 
 Run checks with `pytest` inside `backend`, then `pnpm lint`, `pnpm build`, and the Node tests inside `frontend`.
 
-See [Milestone 2](docs/milestone-2.md) for leagues and membership, then [Milestone 3](docs/milestone-3.md) for the snake-draft state machine.
+See [Milestone 2](docs/milestone-2.md) for leagues and membership, [Milestone 3](docs/milestone-3.md) for the snake-draft state machine, and [Milestone 4](docs/milestone-4.md) for its public interactive preview.
 
 ## Core invariants
 

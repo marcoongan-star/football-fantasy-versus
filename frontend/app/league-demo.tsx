@@ -15,9 +15,47 @@ const activity = [
   { time: "Yesterday · 9:03 PM", label: "Draft scheduled for Friday", kind: "Draft" },
 ];
 
+const draftSeats = ["Wirtz Case Scenario", "False Nine FC", "Expected Goals", "Press Resistant"];
+
+const draftPlayers = [
+  { id: "wirtz", name: "Florian Wirtz", position: "MID", club: "Liverpool" },
+  { id: "salah", name: "Mohamed Salah", position: "MID", club: "Liverpool" },
+  { id: "isak", name: "Alexander Isak", position: "FWD", club: "Newcastle" },
+  { id: "saka", name: "Bukayo Saka", position: "MID", club: "Arsenal" },
+  { id: "palmer", name: "Cole Palmer", position: "MID", club: "Chelsea" },
+  { id: "alisson", name: "Alisson", position: "GK", club: "Liverpool" },
+  { id: "saliba", name: "William Saliba", position: "DEF", club: "Arsenal" },
+  { id: "rodri", name: "Rodri", position: "MID", club: "Manchester City" },
+];
+
+type DemoPick = (typeof draftPlayers)[number] & { manager: string; pick: number; round: number };
+
+function managerForPick(pickNumber: number) {
+  const zeroBased = pickNumber - 1;
+  const roundIndex = Math.floor(zeroBased / draftSeats.length);
+  const indexInRound = zeroBased % draftSeats.length;
+  const seatIndex = roundIndex % 2 === 0 ? indexInRound : draftSeats.length - 1 - indexInRound;
+  return draftSeats[seatIndex];
+}
+
 export function LeagueDemo() {
-  const [tab, setTab] = useState<"overview" | "managers" | "rules">("overview");
+  const [tab, setTab] = useState<"overview" | "draft" | "managers" | "rules">("overview");
   const [showJoin, setShowJoin] = useState(false);
+  const [demoPicks, setDemoPicks] = useState<DemoPick[]>([]);
+
+  const nextPick = demoPicks.length + 1;
+  const nextRound = Math.floor((nextPick - 1) / draftSeats.length) + 1;
+  const currentManager = managerForPick(nextPick);
+  const availablePlayers = draftPlayers.filter(
+    (player) => !demoPicks.some((pick) => pick.id === player.id),
+  );
+
+  function draftPlayer(player: (typeof draftPlayers)[number]) {
+    setDemoPicks((picks) => [
+      ...picks,
+      { ...player, manager: managerForPick(picks.length + 1), pick: picks.length + 1, round: Math.floor(picks.length / draftSeats.length) + 1 },
+    ]);
+  }
 
   return (
     <main>
@@ -28,6 +66,7 @@ export function LeagueDemo() {
         </a>
         <nav aria-label="Primary navigation">
           <a className="nav-link active" href="#league">League</a>
+          <button className="nav-button" onClick={() => { setTab("draft"); document.querySelector("#league")?.scrollIntoView(); }}>Draft room</button>
           <a className="nav-link" href="#modes">How it works</a>
         </nav>
         <button className="button ghost" onClick={() => setShowJoin(true)}>Join a league</button>
@@ -68,7 +107,7 @@ export function LeagueDemo() {
         </div>
 
         <div className="tabbar" role="tablist" aria-label="League demo views">
-          {(["overview", "managers", "rules"] as const).map((item) => (
+          {(["overview", "draft", "managers", "rules"] as const).map((item) => (
             <button
               key={item}
               role="tab"
@@ -98,6 +137,42 @@ export function LeagueDemo() {
               <div className="panel-label">LEAGUE ACTIVITY</div>
               {activity.map((item) => <div className="activity-row" key={item.label}><span className="activity-mark" /><div><strong>{item.label}</strong><small>{item.time}</small></div><span className="tag">{item.kind}</span></div>)}
             </article>
+          </div>
+        )}
+
+        {tab === "draft" && (
+          <div className="draft-room">
+            <div className="draft-head">
+              <div>
+                <span className="overline">INTERACTIVE SEEDED PREVIEW</span>
+                <h3>Snake draft room</h3>
+                <p>Make sample selections to watch the turn order reverse after every round.</p>
+              </div>
+              <div className="clock-card"><span>Pick {nextPick}</span><strong>00:45</strong><small>Round {nextRound}</small></div>
+            </div>
+            <div className="draft-status" aria-live="polite">
+              <span>On the clock</span><strong>{currentManager}</strong><small>Preview state stays on this device and resets on refresh.</small>
+            </div>
+            <div className="draft-layout">
+              <section className="player-pool" aria-label="Available seeded players">
+                <div className="draft-subhead"><strong>Available players</strong><span>{availablePlayers.length} remaining</span></div>
+                {availablePlayers.length ? availablePlayers.map((player) => (
+                  <button className="player-row" key={player.id} onClick={() => draftPlayer(player)}>
+                    <span className={`position ${player.position.toLowerCase()}`}>{player.position}</span>
+                    <span><strong>{player.name}</strong><small>{player.club}</small></span>
+                    <span className="draft-action">Draft →</span>
+                  </button>
+                )) : <p className="empty-state">All seeded preview players have been selected.</p>}
+              </section>
+              <section className="pick-board" aria-label="Drafted players">
+                <div className="draft-subhead"><strong>Pick history</strong><button onClick={() => setDemoPicks([])} disabled={!demoPicks.length}>Reset</button></div>
+                {demoPicks.length ? [...demoPicks].reverse().map((pick) => (
+                  <div className="pick-row" key={pick.id}>
+                    <span>#{pick.pick}</span><div><strong>{pick.name}</strong><small>R{pick.round} · {pick.manager}</small></div>
+                  </div>
+                )) : <p className="empty-state">Choose a player to create the first sample pick.</p>}
+              </section>
+            </div>
           </div>
         )}
 
