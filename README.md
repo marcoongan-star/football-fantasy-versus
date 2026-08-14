@@ -82,6 +82,30 @@ docs/       Product decisions, data flows, and milestone explanations
 .github/    Automated backend and frontend checks
 ```
 
+## Current working features
+
+- Public recruiter demo with no login required.
+- Private league creation, reusable invites, commissioner controls, and a 15-manager limit.
+- Soft member removal with retained history and auditable actions.
+- Durable snake-draft sessions with stable seats, alternating round order, turn validation, and unique player ownership.
+- Eight backend tests plus frontend lint, build, and rendered-page checks.
+
+## Where to make common edits
+
+The public page is intentionally concentrated in a few files so a new contributor can change it without learning the whole backend first.
+
+| What you want to change | File |
+| --- | --- |
+| Public page words and seeded demo content | `frontend/app/league-demo.tsx` |
+| Colors, spacing, and responsive layout | `frontend/app/globals.css` |
+| Browser title and social sharing metadata | `frontend/app/layout.tsx` |
+| League and draft API routes | `backend/app/main.py` |
+| Business rules such as turns and permissions | `backend/app/services.py` |
+| Database tables and constraints | `backend/app/models.py` |
+| Backend behavior checks | `backend/tests/test_leagues.py` |
+
+Edit the public words or styling, save the file, and the local page refreshes automatically while `pnpm dev` is running.
+
 The local API uses SQLite by default for a zero-setup learning path and accepts a PostgreSQL `DATABASE_URL` unchanged. Docker Compose provides PostgreSQL for the production-like path. Google is the chosen production identity provider; development identity headers are rejected outside development mode.
 
 ## Run locally
@@ -104,7 +128,7 @@ Then open `http://localhost:3000`. API documentation is at `http://localhost:800
 
 Run checks with `pytest` inside `backend`, then `pnpm lint`, `pnpm build`, and the Node tests inside `frontend`.
 
-See [Milestone 2](docs/milestone-2.md) for the decisions and data flow.
+See [Milestone 2](docs/milestone-2.md) for leagues and membership, then [Milestone 3](docs/milestone-3.md) for the snake-draft state machine.
 
 ## Core invariants
 
@@ -119,7 +143,8 @@ See [Milestone 2](docs/milestone-2.md) for the decisions and data flow.
 
 ## Free public deployment target
 
-- Vercel Hobby for the public web experience.
+- ChatGPT Sites for the current public, no-login recruiter demo.
+- Vercel Hobby remains an option when the authenticated full-stack application is connected.
 - Neon Free for PostgreSQL.
 - Upstash Free for Redis-compatible coordination and caching.
 - GitHub Actions for public-repository CI and scheduled synchronization.
@@ -131,7 +156,7 @@ Free-tier limits are treated as system constraints: the demo will retain provena
 
 1. Define product boundaries and invariants.
 2. Create leagues, memberships, and private invite flow.
-3. Add transactionally safe snake drafting.
+3. Add transactionally safe snake drafting. **Complete**
 4. Add small-league auction drafting and blind FAAB.
 5. Version scoring rules and calculate Wirtz Ratings.
 6. Add commissioner-reviewed trades and expiration.

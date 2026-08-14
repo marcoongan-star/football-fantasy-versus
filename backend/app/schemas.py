@@ -58,3 +58,27 @@ class AuditEventView(BaseModel):
     detail: str
     created_at: datetime
 
+
+class DraftPickCreate(BaseModel):
+    player_id: str = Field(min_length=1, max_length=80)
+    player_name: str = Field(min_length=1, max_length=120)
+
+
+class DraftPickView(BaseModel):
+    pick_number: int
+    round_number: int
+    user_id: str
+    player_id: str
+    player_name: str
+
+
+class DraftStateView(BaseModel):
+    id: str
+    league_id: str
+    status: str
+    current_pick: int
+    current_round: int
+    seconds_per_pick: int
+    current_user_id: str | None
+    seat_order: list[str]
+    picks: list[DraftPickView]

@@ -94,3 +94,53 @@ class AuditEvent(Base):
     detail: Mapped[str] = mapped_column(String(500), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
+
+class DraftSession(Base):
+    __tablename__ = "draft_sessions"
+    __table_args__ = (
+        UniqueConstraint("league_id", name="uq_draft_session_league"),
+        CheckConstraint("status IN ('active', 'complete')", name="ck_draft_status"),
+        CheckConstraint("current_pick >= 1", name="ck_draft_current_pick"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    league_id: Mapped[str] = mapped_column(ForeignKey("leagues.id"), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="active")
+    current_pick: Mapped[int] = mapped_column(Integer, default=1)
+    rounds: Mapped[int] = mapped_column(Integer, default=15)
+    seconds_per_pick: Mapped[int] = mapped_column(Integer, default=45)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class DraftSeat(Base):
+    __tablename__ = "draft_seats"
+    __table_args__ = (
+        UniqueConstraint("draft_session_id", "seat_number", name="uq_draft_seat_number"),
+        UniqueConstraint("draft_session_id", "user_id", name="uq_draft_seat_user"),
+        CheckConstraint("seat_number >= 1", name="ck_draft_seat_number"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    draft_session_id: Mapped[str] = mapped_column(ForeignKey("draft_sessions.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    seat_number: Mapped[int] = mapped_column(Integer)
+
+
+class DraftPick(Base):
+    __tablename__ = "draft_picks"
+    __table_args__ = (
+        UniqueConstraint("draft_session_id", "pick_number", name="uq_draft_pick_number"),
+        UniqueConstraint("draft_session_id", "player_id", name="uq_draft_pick_player"),
+        CheckConstraint("pick_number >= 1", name="ck_draft_pick_number"),
+        CheckConstraint("round_number >= 1", name="ck_draft_round_number"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    draft_session_id: Mapped[str] = mapped_column(ForeignKey("draft_sessions.id"), index=True)
+    league_id: Mapped[str] = mapped_column(ForeignKey("leagues.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    player_id: Mapped[str] = mapped_column(String(80))
+    player_name: Mapped[str] = mapped_column(String(120))
+    pick_number: Mapped[int] = mapped_column(Integer)
+    round_number: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

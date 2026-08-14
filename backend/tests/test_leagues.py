@@ -136,3 +136,65 @@ def test_private_league_and_audit_require_active_membership(client: TestClient) 
     assert audit_read.status_code == 403
     assert league_read.json()["code"] == "membership_required"
 
+
+def test_snake_draft_advances_and_reverses_in_round_two(client: TestClient) -> None:
+    league = create_league(client)
+    for user_number in (1, 2):
+        assert client.post(
+            "/v1/leagues/join",
+            json={"invite_code": league["invite_code"]},
+            headers=auth_headers(user_number),
+        ).status_code == 200
+
+    started = client.post(
+        f"/v1/leagues/{league['id']}/draft/start", headers=auth_headers(0, "Marco")
+    )
+    assert started.status_code == 200
+    seats = started.json()["seat_order"]
+    assert started.json()["seconds_per_pick"] == 45
+
+    for user_number, player in ((0, "Wirtz"), (1, "Salah"), (2, "Alisson")):
+        picked = client.post(
+            f"/v1/leagues/{league['id']}/draft/picks",
+            json={"player_id": player.lower(), "player_name": player},
+            headers=auth_headers(user_number, "Marco" if user_number == 0 else None),
+        )
+        assert picked.status_code == 200
+
+    state = picked.json()
+    assert state["current_pick"] == 4
+    assert state["current_round"] == 2
+    assert state["current_user_id"] == seats[-1]
+    assert [pick["player_name"] for pick in state["picks"]] == ["Wirtz", "Salah", "Alisson"]
+
+
+def test_snake_draft_rejects_wrong_turn_and_duplicate_player(client: TestClient) -> None:
+    league = create_league(client)
+    client.post(
+        "/v1/leagues/join",
+        json={"invite_code": league["invite_code"]},
+        headers=auth_headers(1),
+    )
+    client.post(f"/v1/leagues/{league['id']}/draft/start", headers=auth_headers(0, "Marco"))
+
+    wrong_turn = client.post(
+        f"/v1/leagues/{league['id']}/draft/picks",
+        json={"player_id": "wirtz", "player_name": "Florian Wirtz"},
+        headers=auth_headers(1),
+    )
+    assert wrong_turn.status_code == 409
+    assert wrong_turn.json()["code"] == "draft_wrong_turn"
+
+    first = client.post(
+        f"/v1/leagues/{league['id']}/draft/picks",
+        json={"player_id": "wirtz", "player_name": "Florian Wirtz"},
+        headers=auth_headers(0, "Marco"),
+    )
+    assert first.status_code == 200
+    duplicate = client.post(
+        f"/v1/leagues/{league['id']}/draft/picks",
+        json={"player_id": "wirtz", "player_name": "Florian Wirtz"},
+        headers=auth_headers(1),
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.json()["code"] == "player_unavailable"

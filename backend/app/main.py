@@ -9,9 +9,12 @@ from sqlalchemy.orm import Session, selectinload
 
 from .auth import Principal, current_principal
 from .database import Database
-from .models import AuditEvent, League, LeagueMember
+from .models import AuditEvent, DraftPick, DraftSession, League, LeagueMember
 from .schemas import (
     AuditEventView,
+    DraftPickCreate,
+    DraftPickView,
+    DraftStateView,
     InviteRotated,
     JoinLeague,
     LeagueCreate,
@@ -22,13 +25,51 @@ from .schemas import (
 from .services import (
     DomainError,
     create_league,
+    draft_seat_order,
+    expected_drafter,
     join_league,
     remove_member,
     require_active_member,
     restore_member,
+    start_snake_draft,
+    submit_draft_pick,
     revoke_invite,
     rotate_invite,
 )
+
+
+def _draft_view(session: Session, draft: DraftSession) -> DraftStateView:
+    seats = draft_seat_order(session, draft.id)
+    picks = list(
+        session.scalars(
+            select(DraftPick)
+            .where(DraftPick.draft_session_id == draft.id)
+            .order_by(DraftPick.pick_number)
+        )
+    )
+    current_user_id = None
+    if draft.status == "active":
+        current_user_id = expected_drafter(seats, draft.current_pick)
+    return DraftStateView(
+        id=draft.id,
+        league_id=draft.league_id,
+        status=draft.status,
+        current_pick=draft.current_pick,
+        current_round=(draft.current_pick - 1) // len(seats) + 1,
+        seconds_per_pick=draft.seconds_per_pick,
+        current_user_id=current_user_id,
+        seat_order=seats,
+        picks=[
+            DraftPickView(
+                pick_number=pick.pick_number,
+                round_number=pick.round_number,
+                user_id=pick.user_id,
+                player_id=pick.player_id,
+                player_name=pick.player_name,
+            )
+            for pick in picks
+        ],
+    )
 
 
 def _league_view(session: Session, league_id: str) -> LeagueView:
@@ -201,6 +242,45 @@ def create_app(
                 .order_by(AuditEvent.created_at.desc())
             )
         )
+
+    @app.post("/v1/leagues/{league_id}/draft/start", response_model=DraftStateView)
+    def start_draft_endpoint(
+        league_id: str,
+        principal: Principal = Depends(current_principal),
+        session: Session = Depends(session_dependency),
+    ) -> DraftStateView:
+        with session.begin():
+            draft = start_snake_draft(session, league_id, principal)
+        return _draft_view(session, draft)
+
+    @app.get("/v1/leagues/{league_id}/draft", response_model=DraftStateView)
+    def get_draft_endpoint(
+        league_id: str,
+        principal: Principal = Depends(current_principal),
+        session: Session = Depends(session_dependency),
+    ) -> DraftStateView:
+        require_active_member(session, league_id, principal)
+        draft = session.scalar(select(DraftSession).where(DraftSession.league_id == league_id))
+        if draft is None:
+            raise HTTPException(status_code=404, detail="Draft not found.")
+        return _draft_view(session, draft)
+
+    @app.post("/v1/leagues/{league_id}/draft/picks", response_model=DraftStateView)
+    def make_draft_pick_endpoint(
+        league_id: str,
+        payload: DraftPickCreate,
+        principal: Principal = Depends(current_principal),
+        session: Session = Depends(session_dependency),
+    ) -> DraftStateView:
+        with session.begin():
+            draft = submit_draft_pick(
+                session,
+                league_id,
+                principal,
+                player_id=payload.player_id,
+                player_name=payload.player_name,
+            )
+        return _draft_view(session, draft)
 
     return app
 

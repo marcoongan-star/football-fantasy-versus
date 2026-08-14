@@ -8,7 +8,16 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .auth import Principal
-from .models import AuditEvent, League, LeagueMember, User, utc_now
+from .models import (
+    AuditEvent,
+    DraftPick,
+    DraftSeat,
+    DraftSession,
+    League,
+    LeagueMember,
+    User,
+    utc_now,
+)
 
 
 @dataclass
@@ -256,3 +265,126 @@ def restore_member(
             )
         )
     return member
+
+
+def start_snake_draft(
+    session: Session, league_id: str, principal: Principal
+) -> DraftSession:
+    league, commissioner = require_commissioner(session, league_id, principal)
+    existing = session.scalar(
+        select(DraftSession).where(DraftSession.league_id == league.id).with_for_update()
+    )
+    if existing is not None:
+        return existing
+
+    members = list(
+        session.scalars(
+            select(LeagueMember)
+            .where(
+                LeagueMember.league_id == league.id,
+                LeagueMember.status == "active",
+            )
+            .order_by(LeagueMember.joined_at, LeagueMember.id)
+        )
+    )
+    if len(members) < 2:
+        raise DomainError("At least two active managers are required.", 409, "draft_too_small")
+
+    draft = DraftSession(league_id=league.id, rounds=15, seconds_per_pick=45)
+    session.add(draft)
+    session.flush()
+    for seat_number, member in enumerate(members, start=1):
+        session.add(
+            DraftSeat(
+                draft_session_id=draft.id,
+                user_id=member.user_id,
+                seat_number=seat_number,
+            )
+        )
+    session.add(
+        AuditEvent(
+            league_id=league.id,
+            actor_user_id=commissioner.id,
+            event_type="draft.started",
+            detail=f"Snake draft started with {len(members)} managers and 45-second picks.",
+        )
+    )
+    session.flush()
+    return draft
+
+
+def draft_seat_order(session: Session, draft_id: str) -> list[str]:
+    return list(
+        session.scalars(
+            select(DraftSeat.user_id)
+            .where(DraftSeat.draft_session_id == draft_id)
+            .order_by(DraftSeat.seat_number)
+        )
+    )
+
+
+def expected_drafter(seat_order: list[str], pick_number: int) -> str:
+    if not seat_order or pick_number < 1:
+        raise ValueError("seat_order and pick_number must be valid")
+    zero_based_pick = pick_number - 1
+    round_index, index_in_round = divmod(zero_based_pick, len(seat_order))
+    seat_index = index_in_round if round_index % 2 == 0 else len(seat_order) - 1 - index_in_round
+    return seat_order[seat_index]
+
+
+def submit_draft_pick(
+    session: Session,
+    league_id: str,
+    principal: Principal,
+    *,
+    player_id: str,
+    player_name: str,
+) -> DraftSession:
+    membership = require_active_member(session, league_id, principal)
+    draft = session.scalar(
+        select(DraftSession)
+        .where(DraftSession.league_id == league_id)
+        .with_for_update()
+    )
+    if draft is None:
+        raise DomainError("The draft has not started.", 409, "draft_not_started")
+    if draft.status != "active":
+        raise DomainError("The draft is complete.", 409, "draft_complete")
+
+    seats = draft_seat_order(session, draft.id)
+    if membership.user_id != expected_drafter(seats, draft.current_pick):
+        raise DomainError("It is not your turn to draft.", 409, "draft_wrong_turn")
+    already_selected = session.scalar(
+        select(DraftPick.id).where(
+            DraftPick.draft_session_id == draft.id,
+            DraftPick.player_id == player_id.strip(),
+        )
+    )
+    if already_selected is not None:
+        raise DomainError("That player has already been drafted.", 409, "player_unavailable")
+
+    round_number = (draft.current_pick - 1) // len(seats) + 1
+    session.add(
+        DraftPick(
+            draft_session_id=draft.id,
+            league_id=league_id,
+            user_id=membership.user_id,
+            player_id=player_id.strip(),
+            player_name=player_name.strip(),
+            pick_number=draft.current_pick,
+            round_number=round_number,
+        )
+    )
+    session.add(
+        AuditEvent(
+            league_id=league_id,
+            actor_user_id=membership.user_id,
+            event_type="draft.pick_made",
+            detail=f"Pick {draft.current_pick}: {player_name.strip()}.",
+        )
+    )
+    draft.current_pick += 1
+    if draft.current_pick > len(seats) * draft.rounds:
+        draft.status = "complete"
+    session.flush()
+    return draft
