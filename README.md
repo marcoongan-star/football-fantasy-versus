@@ -2,7 +2,7 @@
 
 A configurable fantasy-football platform that combines transparent real-performance scoring with a separate, reproducible career simulation.
 
-> Status: Milestone 2 is implemented locally: public recruiter demo plus tested league, membership, invite, commissioner, and audit foundations.
+> Status: the public recruiter demo, league and draft foundations, and replayable Career Mode match engine are working and tested.
 
 ## Why FFV exists
 
@@ -89,7 +89,8 @@ docs/       Product decisions, data flows, and milestone explanations
 - Soft member removal with retained history and auditable actions.
 - Durable snake-draft sessions with stable seats, alternating round order, turn validation, and unique player ownership.
 - Interactive, resettable public draft preview that makes the snake-order reversal visible without requiring login.
-- Eight backend tests plus frontend lint, build, and rendered-page checks.
+- Formation-aware Career Mode simulation with tactics, fatigue, expected goals, home advantage, and seeded replay.
+- Fourteen backend tests plus frontend lint, build, and rendered-page checks.
 
 ## Where to make common edits
 
@@ -129,7 +130,7 @@ Then open `http://localhost:3000`. API documentation is at `http://localhost:800
 
 Run checks with `pytest` inside `backend`, then `pnpm lint`, `pnpm build`, and the Node tests inside `frontend`.
 
-See [Milestone 2](docs/milestone-2.md) for leagues and membership, [Milestone 3](docs/milestone-3.md) for the snake-draft state machine, and [Milestone 4](docs/milestone-4.md) for its public interactive preview.
+See [Milestone 2](docs/milestone-2.md) for leagues and membership, [Milestone 3](docs/milestone-3.md) for the snake-draft state machine, [Milestone 4](docs/milestone-4.md) for its public interactive preview, and [Milestone 5](docs/milestone-5.md) for Career Mode simulation.
 
 ## Core invariants
 

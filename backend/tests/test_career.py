@@ -1,4 +1,5 @@
 import pytest
+from fastapi.testclient import TestClient
 
 from app.career import (
     CareerPlayer,
@@ -9,6 +10,7 @@ from app.career import (
     simulate_career_match,
     starts_after_fixture,
 )
+from app.main import create_app
 
 
 def lineup(team_id: str, mentality: Mentality = Mentality.BALANCED) -> TeamSheet:
@@ -57,3 +59,36 @@ def test_match_replays_exactly_from_seed_and_preserves_draws() -> None:
     replay = simulate_career_match(lineup("home"), lineup("away"), seed=14)
     assert first == replay
     assert first.outcome in {"home_win", "away_win", "draw"}
+
+
+def test_public_simulation_endpoint_exposes_replay_inputs(tmp_path) -> None:
+    client = TestClient(
+        create_app(database_url=f"sqlite:///{tmp_path / 'career.db'}", auth_mode="development")
+    )
+
+    def team(team_id: str) -> dict[str, object]:
+        sheet = lineup(team_id)
+        return {
+            "team_id": team_id,
+            "formation": sheet.formation,
+            "mentality": sheet.mentality,
+            "starters": [
+                {
+                    "player_id": player.player_id,
+                    "position": player.position,
+                    "attack": player.attack,
+                    "defense": player.defense,
+                    "consecutive_starts": player.consecutive_starts,
+                }
+                for player in sheet.starters
+            ],
+        }
+
+    payload = {"home": team("home"), "away": team("away"), "seed": 2026}
+    first = client.post("/v1/career/simulate", json=payload)
+    replay = client.post("/v1/career/simulate", json=payload)
+
+    assert first.status_code == 200
+    assert first.json() == replay.json()
+    assert first.json()["seed"] == 2026
+    assert "Synthetic" in first.json()["data_status"]

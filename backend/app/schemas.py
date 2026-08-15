@@ -4,6 +4,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .career import Mentality, Position
+
 
 class LeagueCreate(BaseModel):
     name: str = Field(min_length=3, max_length=80)
@@ -82,3 +84,36 @@ class DraftStateView(BaseModel):
     current_user_id: str | None
     seat_order: list[str]
     picks: list[DraftPickView]
+
+
+class CareerPlayerInput(BaseModel):
+    player_id: str = Field(min_length=1, max_length=80)
+    position: Position
+    attack: float = Field(ge=0, le=100)
+    defense: float = Field(ge=0, le=100)
+    consecutive_starts: int = Field(default=0, ge=0)
+
+
+class CareerTeamInput(BaseModel):
+    team_id: str = Field(min_length=1, max_length=80)
+    formation: str = Field(min_length=5, max_length=5)
+    mentality: Mentality
+    starters: list[CareerPlayerInput] = Field(min_length=11, max_length=11)
+
+
+class CareerSimulationRequest(BaseModel):
+    home: CareerTeamInput
+    away: CareerTeamInput
+    seed: int
+
+
+class CareerSimulationResponse(BaseModel):
+    home_team_id: str
+    away_team_id: str
+    home_goals: int
+    away_goals: int
+    home_expected_goals: float
+    away_expected_goals: float
+    outcome: str
+    seed: int
+    data_status: str
