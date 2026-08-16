@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { CareerDemo } from "./career-demo";
 
 const managers = [
   { initials: "MO", name: "Marco", team: "Wirtz Case Scenario", role: "Commissioner", tone: "red" },
@@ -67,6 +68,7 @@ export function LeagueDemo() {
         <nav aria-label="Primary navigation">
           <a className="nav-link active" href="#league">League</a>
           <button className="nav-button" onClick={() => { setTab("draft"); document.querySelector("#league")?.scrollIntoView(); }}>Draft room</button>
+          <a className="nav-link" href="#career">Career H2H</a>
           <a className="nav-link" href="#modes">How it works</a>
         </nav>
         <button className="button ghost" onClick={() => setShowJoin(true)}>Join a league</button>
@@ -192,6 +194,8 @@ export function LeagueDemo() {
           </div>
         )}
       </section>
+
+      <CareerDemo />
 
       <footer><span>FFV is an independent educational project.</span><span>No affiliation with FPL, FotMob, StatsBomb, or the Premier League.</span></footer>
 
