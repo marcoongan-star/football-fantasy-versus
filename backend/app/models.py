@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    JSON,
     String,
     UniqueConstraint,
 )
@@ -143,4 +144,31 @@ class DraftPick(Base):
     player_name: Mapped[str] = mapped_column(String(120))
     pick_number: Mapped[int] = mapped_column(Integer)
     round_number: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class CareerMatch(Base):
+    __tablename__ = "career_matches"
+    __table_args__ = (
+        UniqueConstraint("league_id", "fixture_key", name="uq_career_fixture"),
+        CheckConstraint("gameweek >= 1", name="ck_career_gameweek"),
+        CheckConstraint("home_goals >= 0 AND away_goals >= 0", name="ck_career_goals"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    league_id: Mapped[str] = mapped_column(ForeignKey("leagues.id"), index=True)
+    fixture_key: Mapped[str] = mapped_column(String(80))
+    gameweek: Mapped[int] = mapped_column(Integer, index=True)
+    home_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    away_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    home_team_id: Mapped[str] = mapped_column(String(80))
+    away_team_id: Mapped[str] = mapped_column(String(80))
+    model_version: Mapped[str] = mapped_column(String(30), default="career-v0.1")
+    seed: Mapped[int] = mapped_column(Integer)
+    input_snapshot: Mapped[dict[str, object]] = mapped_column(JSON)
+    home_expected_goals: Mapped[str] = mapped_column(String(12))
+    away_expected_goals: Mapped[str] = mapped_column(String(12))
+    home_goals: Mapped[int] = mapped_column(Integer)
+    away_goals: Mapped[int] = mapped_column(Integer)
+    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
