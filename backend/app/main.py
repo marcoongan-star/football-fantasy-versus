@@ -8,13 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from .auth import Principal, current_principal
-from .career import CareerPlayer, TeamSheet, simulate_career_match
+from .career_api import install_career_routes
 from .database import Database
 from .models import AuditEvent, DraftPick, DraftSession, League, LeagueMember
 from .schemas import (
     AuditEventView,
-    CareerSimulationRequest,
-    CareerSimulationResponse,
     DraftPickCreate,
     DraftPickView,
     DraftStateView,
@@ -141,53 +139,7 @@ def create_app(
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/v1/demo/league")
-    def demo_league() -> dict[str, object]:
-        return {
-            "name": "The Gegenpress Society",
-            "active_member_count": 8,
-            "max_members": 15,
-            "next_event": "Snake draft · Friday 7:30 PM",
-            "modes": ["Real Performance", "Career Simulation"],
-            "data_status": "Seeded demonstration — no live data implied",
-        }
-
-    @app.post("/v1/career/simulate", response_model=CareerSimulationResponse)
-    def simulate_career_fixture(payload: CareerSimulationRequest) -> CareerSimulationResponse:
-        def team_sheet(team) -> TeamSheet:  # type: ignore[no-untyped-def]
-            return TeamSheet(
-                team_id=team.team_id,
-                formation=team.formation,
-                mentality=team.mentality,
-                starters=tuple(
-                    CareerPlayer(
-                        player_id=player.player_id,
-                        position=player.position,
-                        attack=player.attack,
-                        defense=player.defense,
-                        consecutive_starts=player.consecutive_starts,
-                    )
-                    for player in team.starters
-                ),
-            )
-
-        try:
-            result = simulate_career_match(
-                team_sheet(payload.home), team_sheet(payload.away), seed=payload.seed
-            )
-        except ValueError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from error
-        return CareerSimulationResponse(
-            home_team_id=result.home_team_id,
-            away_team_id=result.away_team_id,
-            home_goals=result.home_goals,
-            away_goals=result.away_goals,
-            home_expected_goals=result.home_expected_goals,
-            away_expected_goals=result.away_expected_goals,
-            outcome=result.outcome,
-            seed=result.seed,
-            data_status="Synthetic career simulation — no real match prediction implied.",
-        )
+    install_career_routes(app, session_dependency)
 
     @app.post("/v1/leagues", response_model=LeagueCreated, status_code=201)
     def create_league_endpoint(

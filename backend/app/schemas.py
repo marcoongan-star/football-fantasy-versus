@@ -117,3 +117,33 @@ class CareerSimulationResponse(BaseModel):
     outcome: str
     seed: int
     data_status: str
+
+
+class OfficialCareerMatchCreate(BaseModel):
+    fixture_key: str = Field(min_length=1, max_length=80)
+    gameweek: int = Field(ge=1)
+    home_user_id: str = Field(min_length=1, max_length=36)
+    away_user_id: str = Field(min_length=1, max_length=36)
+    home: CareerTeamInput
+    away: CareerTeamInput
+    seed: int
+
+
+class CareerMatchView(BaseModel):
+    id: str
+    league_id: str
+    fixture_key: str
+    gameweek: int
+    home_user_id: str
+    away_user_id: str
+    home_team_id: str
+    away_team_id: str
+    model_version: str
+    seed: int
+    input_snapshot: dict[str, object]
+    home_expected_goals: float
+    away_expected_goals: float
+    home_goals: int
+    away_goals: int
+    outcome: str
+    created_at: datetime

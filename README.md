@@ -91,6 +91,7 @@ docs/       Product decisions, data flows, and milestone explanations
 - Interactive, resettable public draft preview that makes the snake-order reversal visible without requiring login.
 - Formation-aware Career Mode simulation with tactics, fatigue, expected goals, home advantage, and seeded replay.
 - Interactive public Career head-to-head preview with formation and mentality controls.
+- Immutable official Career match snapshots that preserve lineups, ratings, fatigue, model version, seed, xG, and result.
 - Fourteen backend tests plus frontend lint, build, and rendered-page checks.
 
 ## Where to make common edits
@@ -131,7 +132,7 @@ Then open `http://localhost:3000`. API documentation is at `http://localhost:800
 
 Run checks with `pytest` inside `backend`, then `pnpm lint`, `pnpm build`, and the Node tests inside `frontend`.
 
-See [Milestone 2](docs/milestone-2.md) for leagues and membership, [Milestone 3](docs/milestone-3.md) for the snake-draft state machine, [Milestone 4](docs/milestone-4.md) for its public interactive preview, [Milestone 5](docs/milestone-5.md) for Career Mode simulation, and [Milestone 6](docs/milestone-6.md) for the public head-to-head slice.
+See [Milestone 2](docs/milestone-2.md) for leagues and membership, [Milestone 3](docs/milestone-3.md) for the snake-draft state machine, [Milestone 4](docs/milestone-4.md) for its public interactive preview, [Milestone 5](docs/milestone-5.md) for Career Mode simulation, [Milestone 6](docs/milestone-6.md) for the public head-to-head slice, and [Milestone 7](docs/milestone-7.md) for immutable league history.
 
 ## Core invariants
 
