@@ -93,6 +93,7 @@ docs/       Product decisions, data flows, and milestone explanations
 - Interactive public Career head-to-head preview with formation and mentality controls.
 - Immutable official Career match snapshots that preserve lineups, ratings, fatigue, model version, seed, xG, and result.
 - Separate Career standings with 3/1/0 points, goal difference, goals scored, and head-to-head tiebreaking.
+- Reproducible Career table snapshots as of any completed gameweek.
 - Auditable void-and-replace corrections that preserve every original match snapshot.
 - Backend tests plus frontend lint, build, and rendered-page checks.
 

@@ -165,6 +165,23 @@ def install_career_routes(app: FastAPI, session_dependency: SessionDependency) -
             for standing in career_standings(session, league_id, principal)
         ]
 
+    @app.get(
+        "/v1/leagues/{league_id}/career/standings/as-of/{gameweek}",
+        response_model=list[CareerStandingView],
+    )
+    def get_career_standings_as_of_gameweek(
+        league_id: str,
+        gameweek: int,
+        principal: Principal = Depends(current_principal),
+        session: Session = Depends(session_dependency),
+    ) -> list[CareerStandingView]:
+        return [
+            CareerStandingView(**standing.__dict__)
+            for standing in career_standings(
+                session, league_id, principal, as_of_gameweek=gameweek
+            )
+        ]
+
     @app.post(
         "/v1/leagues/{league_id}/career/matches/{match_id}/void",
         response_model=CareerMatchView,

@@ -100,3 +100,25 @@ def test_replacement_preserves_history_but_only_active_result_counts(client) -> 
         headers=auth_headers(1),
     ).json()
     assert all(row["played"] == 1 for row in after)
+
+    week_two = {
+        **original_payload,
+        "fixture_key": "gw02-marco-manager1",
+        "gameweek": 2,
+        "seed": 44,
+    }
+    assert client.post(
+        f"/v1/leagues/{created['id']}/career/matches",
+        json=week_two,
+        headers=auth_headers(0, "Marco"),
+    ).status_code == 201
+    latest = client.get(
+        f"/v1/leagues/{created['id']}/career/standings",
+        headers=auth_headers(1),
+    ).json()
+    week_one_snapshot = client.get(
+        f"/v1/leagues/{created['id']}/career/standings/as-of/1",
+        headers=auth_headers(1),
+    ).json()
+    assert all(row["played"] == 2 for row in latest)
+    assert all(row["played"] == 1 for row in week_one_snapshot)

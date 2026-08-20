@@ -10,6 +10,8 @@ The immutable match history is the source of truth. Standings are calculated fro
 
 Real Performance standings remain completely separate.
 
+The API can also rebuild the table as it stood after a selected gameweek. This is calculated from the same active immutable records with `gameweek <= requested gameweek`; it does not save mutable weekly point totals or use later matches.
+
 ## Corrections without rewriting history
 
 An incorrect official match is never edited or deleted. A commissioner can record a new immutable replacement, then append a void record that explains the error and links the original to its replacement. Standings use the replacement while excluding the voided result.

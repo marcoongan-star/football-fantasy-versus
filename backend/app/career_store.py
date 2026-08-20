@@ -160,9 +160,15 @@ def void_career_match(
 
 
 def career_standings(
-    session: Session, league_id: str, principal: Principal
+    session: Session,
+    league_id: str,
+    principal: Principal,
+    *,
+    as_of_gameweek: int | None = None,
 ) -> tuple[CareerStanding, ...]:
     require_active_member(session, league_id, principal)
+    if as_of_gameweek is not None and as_of_gameweek < 1:
+        raise DomainError("Gameweek must be positive.", 422, "gameweek_invalid")
     participant_ids = tuple(
         session.scalars(
             select(LeagueMember.user_id).where(
@@ -171,7 +177,7 @@ def career_standings(
             )
         )
     )
-    matches = session.scalars(
+    match_query = (
         select(CareerMatch)
         .outerjoin(CareerMatchVoid, CareerMatchVoid.match_id == CareerMatch.id)
         .where(
@@ -179,6 +185,9 @@ def career_standings(
             CareerMatchVoid.id.is_(None),
         )
     )
+    if as_of_gameweek is not None:
+        match_query = match_query.where(CareerMatch.gameweek <= as_of_gameweek)
+    matches = session.scalars(match_query)
     return build_career_table(
         tuple(
             CareerResult(
