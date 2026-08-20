@@ -5,8 +5,9 @@ from sqlalchemy.orm import Session
 
 from .auth import Principal
 from .career import TeamSheet, simulate_career_match
-from .models import AuditEvent, CareerMatch, LeagueMember
-from .services import DomainError, require_commissioner
+from .career_standings import CareerResult, CareerStanding, build_career_table
+from .models import AuditEvent, CareerMatch, CareerMatchVoid, LeagueMember
+from .services import DomainError, require_active_member, require_commissioner
 
 
 def _team_snapshot(team: TeamSheet) -> dict[str, object]:
@@ -102,3 +103,91 @@ def record_career_match(
     )
     session.flush()
     return match
+
+
+def void_career_match(
+    session: Session,
+    league_id: str,
+    match_id: str,
+    principal: Principal,
+    *,
+    reason: str,
+    replacement_match_id: str | None = None,
+) -> CareerMatchVoid:
+    league, commissioner = require_commissioner(session, league_id, principal)
+    match = session.scalar(
+        select(CareerMatch).where(
+            CareerMatch.id == match_id, CareerMatch.league_id == league.id
+        )
+    )
+    if match is None:
+        raise DomainError("Career match not found.", 404, "career_match_not_found")
+    if not reason.strip():
+        raise DomainError("A void reason is required.", 422, "void_reason_required")
+    if session.scalar(select(CareerMatchVoid).where(CareerMatchVoid.match_id == match.id)):
+        raise DomainError("Career match is already void.", 409, "career_match_already_void")
+    if replacement_match_id is not None:
+        replacement = session.scalar(
+            select(CareerMatch).where(
+                CareerMatch.id == replacement_match_id,
+                CareerMatch.league_id == league.id,
+            )
+        )
+        if replacement is None or replacement.id == match.id:
+            raise DomainError(
+                "Replacement match must be a different match in this league.",
+                409,
+                "career_replacement_invalid",
+            )
+    void = CareerMatchVoid(
+        league_id=league.id,
+        match_id=match.id,
+        replacement_match_id=replacement_match_id,
+        reason=reason.strip(),
+        created_by_user_id=commissioner.id,
+    )
+    session.add(void)
+    session.add(
+        AuditEvent(
+            league_id=league.id,
+            actor_user_id=commissioner.id,
+            event_type="career.match_voided",
+            detail=f"Voided {match.fixture_key}: {reason.strip()}",
+        )
+    )
+    session.flush()
+    return void
+
+
+def career_standings(
+    session: Session, league_id: str, principal: Principal
+) -> tuple[CareerStanding, ...]:
+    require_active_member(session, league_id, principal)
+    participant_ids = tuple(
+        session.scalars(
+            select(LeagueMember.user_id).where(
+                LeagueMember.league_id == league_id,
+                LeagueMember.status == "active",
+            )
+        )
+    )
+    matches = session.scalars(
+        select(CareerMatch)
+        .outerjoin(CareerMatchVoid, CareerMatchVoid.match_id == CareerMatch.id)
+        .where(
+            CareerMatch.league_id == league_id,
+            CareerMatchVoid.id.is_(None),
+        )
+    )
+    return build_career_table(
+        tuple(
+            CareerResult(
+                match.home_user_id,
+                match.away_user_id,
+                match.home_goals,
+                match.away_goals,
+            )
+            for match in matches
+        ),
+        participant_ids,
+    )

@@ -147,3 +147,34 @@ class CareerMatchView(BaseModel):
     away_goals: int
     outcome: str
     created_at: datetime
+    status: str
+    void_reason: str | None = None
+    replacement_match_id: str | None = None
+
+
+class CareerStandingView(BaseModel):
+    position: int
+    user_id: str
+    played: int
+    wins: int
+    draws: int
+    losses: int
+    goals_for: int
+    goals_against: int
+    goal_difference: int
+    points: int
+    head_to_head_points: int
+
+
+class CareerVoidInput(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class CareerReplacementInput(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
+    replacement: OfficialCareerMatchCreate
+
+
+class CareerCorrectionView(BaseModel):
+    voided_match: CareerMatchView
+    replacement_match: CareerMatchView

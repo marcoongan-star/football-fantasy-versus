@@ -172,3 +172,32 @@ class CareerMatch(Base):
     away_goals: Mapped[int] = mapped_column(Integer)
     created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    void_record: Mapped["CareerMatchVoid | None"] = relationship(
+        foreign_keys="CareerMatchVoid.match_id",
+        back_populates="match",
+        uselist=False,
+    )
+
+
+class CareerMatchVoid(Base):
+    __tablename__ = "career_match_voids"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    league_id: Mapped[str] = mapped_column(ForeignKey("leagues.id"), index=True)
+    match_id: Mapped[str] = mapped_column(
+        ForeignKey("career_matches.id"), unique=True, index=True
+    )
+    replacement_match_id: Mapped[str | None] = mapped_column(
+        ForeignKey("career_matches.id"), unique=True, nullable=True
+    )
+    reason: Mapped[str] = mapped_column(String(500))
+    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    match: Mapped[CareerMatch] = relationship(
+        foreign_keys=[match_id], back_populates="void_record"
+    )
+    replacement_match: Mapped[CareerMatch | None] = relationship(
+        foreign_keys=[replacement_match_id]
+    )
