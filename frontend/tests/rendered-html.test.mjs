@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-async function render() {
+async function render(path = "/") {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
   return worker.fetch(
-    new Request("http://localhost/", { headers: { accept: "text/html" } }),
+    new Request(`http://localhost${path}`, { headers: { accept: "text/html" } }),
     { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
     { waitUntil() {}, passThroughOnException() {} },
   );
@@ -32,9 +32,20 @@ test("labels demonstration data and preserves no-login access", async () => {
   const response = await render();
   const html = await response.text();
   assert.match(html, /seeded data/i);
-  assert.match(html, /Join a league/);
+  assert.match(html, /Open league app/);
   assert.match(html, /Explore demo league/);
   assert.match(html, /No affiliation with FPL, FotMob, StatsBomb/);
   assert.match(html, /Run next seed/);
   assert.match(html, /no real match prediction/i);
+});
+
+test("server-renders the separate league workspace", async () => {
+  const response = await render("/app");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /League Workspace — FFV/);
+  assert.match(html, /Career command centre/);
+  assert.match(html, /Separate career table/i);
+  assert.match(html, /Seeded preview/i);
+  assert.match(html, /Immutable event history/i);
 });
