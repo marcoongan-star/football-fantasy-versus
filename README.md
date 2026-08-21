@@ -104,6 +104,8 @@ The public page is intentionally concentrated in a few files so a new contributo
 | What you want to change | File |
 | --- | --- |
 | Public page words, seeded players, managers, and demo content | `frontend/app/league-demo.tsx` |
+| Private league workspace and career table | `frontend/app/app/ffv-app.tsx` |
+| Typed API/fallback boundary for that workspace | `frontend/app/app/ffv-api.ts` |
 | Colors, spacing, and responsive layout | `frontend/app/globals.css` |
 | Browser title and social sharing metadata | `frontend/app/layout.tsx` |
 | League and draft API routes | `backend/app/main.py` |
@@ -131,7 +133,7 @@ pnpm install
 pnpm dev
 ```
 
-Then open `http://localhost:3000`. API documentation is at `http://localhost:8000/docs`.
+Then open `http://localhost:3000` for the recruiter story or `http://localhost:3000/app` for the league workspace. API documentation is at `http://localhost:8000/docs`.
 
 Run checks with `pytest` inside `backend`, then `pnpm lint`, `pnpm build`, and the Node tests inside `frontend`.
 
