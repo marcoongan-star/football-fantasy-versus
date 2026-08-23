@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { demoWorkspace, loadLeagueWorkspace, type LeagueWorkspace } from "./ffv-api";
 
 const managerNames: Record<string, string> = {
@@ -10,8 +11,8 @@ const managerNames: Record<string, string> = {
   rosa: "Press Resistant",
 };
 
-export function FfvApp() {
-  const [view, setView] = useState<"league" | "draft" | "career">("career");
+export function FfvApp({ initialView = "career" }: { initialView?: "league" | "draft" | "career" }) {
+  const [view, setView] = useState<"league" | "draft" | "career">(initialView);
   const [asOf, setAsOf] = useState<"current" | "7" | "8">("current");
   const [workspace, setWorkspace] = useState<LeagueWorkspace>(demoWorkspace());
   const [connection, setConnection] = useState<"loading" | "api" | "demo">(
@@ -44,7 +45,7 @@ export function FfvApp() {
   return (
     <main className="ffv-workspace">
       <aside className="app-sidebar">
-        <a href="/" className="app-logo"><span>FFV</span><small>Football Fantasy Versus</small></a>
+        <Link href="/" className="app-logo"><span>FFV</span><small>Football Fantasy Versus</small></Link>
         <div className="league-switcher"><small>ACTIVE LEAGUE</small><strong>{workspace.leagueName}</strong><span>8 of 15 managers</span></div>
         <nav aria-label="League workspace">
           {(["league", "draft", "career"] as const).map((item) => (
@@ -102,10 +103,56 @@ export function FfvApp() {
         )}
 
         {view === "league" && <EmptyView eyebrow="PRIVATE, COMMISSIONER-CONTROLLED" title="League operations" copy="Create or join a league, rotate reusable invite codes, remove members, and inspect the audit history. Membership writes belong to the API—not the browser." action="Manage members" />}
-        {view === "draft" && <EmptyView eyebrow="PRICE-TIME IS FOR MARKETS. THIS IS SNAKE ORDER." title="Live draft room" copy="The server owns the seat order, pick clock, roster limits, and every accepted selection. The interface can reconnect without inventing draft state." action="Open draft board" />}
+        {view === "draft" && <DraftWorkspace key={`${workspace.source}-${workspace.draft.current_pick}`} draft={workspace.draft} connection={connection} />}
       </section>
     </main>
   );
+}
+
+function DraftWorkspace({ draft, connection }: { draft: LeagueWorkspace["draft"]; connection: "loading" | "api" | "demo" }) {
+  const [seconds, setSeconds] = useState(32);
+  const [syncedPick, setSyncedPick] = useState(draft.current_pick - 1);
+
+  useEffect(() => {
+    if (seconds <= 0) return;
+    const timer = window.setTimeout(() => setSeconds((value) => Math.max(0, value - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [seconds]);
+
+  const currentManager = draft.current_user_id ? managerNames[draft.current_user_id] ?? draft.current_user_id : "Draft complete";
+
+  return <>
+    <div className="draft-command-strip">
+      <div><small>SERVER-AUTHORITATIVE CURSOR</small><strong>Pick {draft.current_pick} · Round {draft.current_round}</strong><span>Last accepted pick {syncedPick}</span></div>
+      <div className="draft-clock"><small>TURN CLOCK</small><strong>00:{String(seconds).padStart(2, "0")}</strong><span>Server validates the deadline</span></div>
+      <div className={`draft-sync ${connection}`}><span /><div><small>{connection === "api" ? "API CONNECTED" : "SEEDED RECONNECT PREVIEW"}</small><strong>State rebuilt from accepted picks</strong></div></div>
+    </div>
+
+    <div className="app-draft-grid">
+      <article className="workspace-panel draft-board-panel">
+        <div className="panel-title"><div><small>LIVE SNAKE ORDER</small><h2>Draft board</h2></div><span>45 seconds per pick</span></div>
+        <div className="draft-rounds">
+          {[1, 2].map((round) => <section key={round}><header><strong>ROUND {round}</strong><span>{round === 1 ? "→" : "←"} snake direction</span></header><div>
+            {draft.seat_order.map((manager, seatIndex) => {
+              const orderedIndex = round % 2 === 1 ? seatIndex : draft.seat_order.length - 1 - seatIndex;
+              const pickNumber = (round - 1) * draft.seat_order.length + orderedIndex + 1;
+              const pick = draft.picks.find((item) => item.pick_number === pickNumber);
+              return <article className={pickNumber === draft.current_pick ? "on-clock" : pick ? "accepted" : "waiting"} key={pickNumber}><small>#{pickNumber}</small><strong>{pick?.player_name ?? (pickNumber === draft.current_pick ? "ON THE CLOCK" : "Waiting")}</strong><span>{managerNames[pick?.user_id ?? manager] ?? pick?.user_id ?? manager}</span></article>;
+            })}
+          </div></section>)}
+        </div>
+      </article>
+
+      <aside className="workspace-panel on-clock-panel">
+        <div className="panel-title"><div><small>CURRENT TURN</small><h2>{currentManager}</h2></div><span className="locked-pill">Pick {draft.current_pick}</span></div>
+        <div className="clock-orbit"><strong>{seconds}</strong><span>seconds</span></div>
+        <p>The browser may display the countdown, but only the API accepts a pick, enforces unique ownership, and advances the cursor once.</p>
+        <div className="reconnect-proof"><small>RECONNECT CONTRACT</small><ol><li>Send last accepted pick: {syncedPick}</li><li>Fetch canonical draft state</li><li>Replace local board, never merge guesses</li></ol></div>
+        <button onClick={() => setSyncedPick(draft.current_pick - 1)}>Resync from server →</button>
+      </aside>
+    </div>
+    <p className="workspace-disclaimer">Seeded recruiter preview unless the authenticated API badge is active. Player selections are demonstrations, not a live draft.</p>
+  </>;
 }
 
 function EmptyView({ eyebrow, title, copy, action }: { eyebrow: string; title: string; copy: string; action: string }) {

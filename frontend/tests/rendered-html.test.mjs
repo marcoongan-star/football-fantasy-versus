@@ -49,3 +49,15 @@ test("server-renders the separate league workspace", async () => {
   assert.match(html, /Seeded preview/i);
   assert.match(html, /Immutable event history/i);
 });
+
+test("server-renders the reconnectable draft room", async () => {
+  const response = await render("/app/draft");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /Draft Room — FFV/);
+  assert.match(html, /server-authoritative cursor/i);
+  assert.match(html, /State rebuilt from accepted picks/i);
+  assert.match(html, /Florian Wirtz/);
+  assert.match(html, /Reconnect contract/i);
+  assert.match(html, /45 seconds per pick/i);
+});
