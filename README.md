@@ -146,11 +146,12 @@ See [Milestone 2](docs/milestone-2.md) for leagues and membership, [Milestone 3]
 2. A valid draft pick advances the turn exactly once.
 3. Retrying the immediately previous accepted pick cannot advance the turn twice.
 4. FAAB balances cannot become negative.
-5. A trade conserves the set of owned players.
-6. Published scoring-rule versions are immutable.
-7. Replaying a simulation with identical inputs and seed produces the same result.
-8. Career table points equal three per win plus one per draw.
-9. Reprocessing the same provider update cannot duplicate performances or points.
+5. No FAAB award can end with an unresolved equal bid; hidden priority resolves equal displayed amounts without exposing another manager's bid.
+6. A trade conserves the set of owned players.
+7. Published scoring-rule versions are immutable.
+8. Replaying a simulation with identical inputs and seed produces the same result.
+9. Career table points equal three per win plus one per draw.
+10. Reprocessing the same provider update cannot duplicate performances or points.
 
 ## Free public deployment target
 
