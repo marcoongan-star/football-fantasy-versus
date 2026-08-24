@@ -138,18 +138,19 @@ Then open `http://localhost:3000` for the recruiter story, `http://localhost:300
 
 Run checks with `pytest` inside `backend`, then `pnpm lint`, `pnpm build`, and the Node tests inside `frontend`.
 
-See [Milestone 2](docs/milestone-2.md) for leagues and membership, [Milestone 3](docs/milestone-3.md) for the snake-draft state machine, [Milestone 4](docs/milestone-4.md) for its public interactive preview, [Milestone 5](docs/milestone-5.md) for Career Mode simulation, [Milestone 6](docs/milestone-6.md) for the public head-to-head slice, [Milestone 7](docs/milestone-7.md) for immutable league history, [Milestone 8](docs/milestone-8.md) for derived standings and corrections, and [Milestone 9](docs/milestone-9.md) for the reconnectable private draft workspace.
+See [Milestone 2](docs/milestone-2.md) for leagues and membership, [Milestone 3](docs/milestone-3.md) for the snake-draft state machine, [Milestone 4](docs/milestone-4.md) for its public interactive preview, [Milestone 5](docs/milestone-5.md) for Career Mode simulation, [Milestone 6](docs/milestone-6.md) for the public head-to-head slice, [Milestone 7](docs/milestone-7.md) for immutable league history, [Milestone 8](docs/milestone-8.md) for derived standings and corrections, [Milestone 9](docs/milestone-9.md) for the reconnectable private draft workspace, and [Milestone 10](docs/milestone-10.md) for retry-safe draft commands.
 
 ## Core invariants
 
 1. A player cannot be owned twice in the same league.
 2. A valid draft pick advances the turn exactly once.
-3. FAAB balances cannot become negative.
-4. A trade conserves the set of owned players.
-5. Published scoring-rule versions are immutable.
-6. Replaying a simulation with identical inputs and seed produces the same result.
-7. Career table points equal three per win plus one per draw.
-8. Reprocessing the same provider update cannot duplicate performances or points.
+3. Retrying the immediately previous accepted pick cannot advance the turn twice.
+4. FAAB balances cannot become negative.
+5. A trade conserves the set of owned players.
+6. Published scoring-rule versions are immutable.
+7. Replaying a simulation with identical inputs and seed produces the same result.
+8. Career table points equal three per win plus one per draw.
+9. Reprocessing the same provider update cannot duplicate performances or points.
 
 ## Free public deployment target
 
