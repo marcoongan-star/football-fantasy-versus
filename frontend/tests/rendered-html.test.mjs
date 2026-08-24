@@ -59,5 +59,6 @@ test("server-renders the reconnectable draft room", async () => {
   assert.match(html, /State rebuilt from accepted picks/i);
   assert.match(html, /Florian Wirtz/);
   assert.match(html, /Reconnect contract/i);
+  assert.match(html, /Retrying the same accepted player is safe/i);
   assert.match(html, /45 seconds per pick/i);
 });

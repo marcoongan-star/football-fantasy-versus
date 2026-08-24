@@ -352,16 +352,22 @@ def submit_draft_pick(
         raise DomainError("The draft is complete.", 409, "draft_complete")
 
     seats = draft_seat_order(session, draft.id)
-    if membership.user_id != expected_drafter(seats, draft.current_pick):
-        raise DomainError("It is not your turn to draft.", 409, "draft_wrong_turn")
     already_selected = session.scalar(
-        select(DraftPick.id).where(
+        select(DraftPick).where(
             DraftPick.draft_session_id == draft.id,
             DraftPick.player_id == player_id.strip(),
         )
     )
     if already_selected is not None:
+        if (
+            already_selected.user_id == membership.user_id
+            and already_selected.pick_number == draft.current_pick - 1
+            and already_selected.player_name == player_name.strip()
+        ):
+            return draft
         raise DomainError("That player has already been drafted.", 409, "player_unavailable")
+    if membership.user_id != expected_drafter(seats, draft.current_pick):
+        raise DomainError("It is not your turn to draft.", 409, "draft_wrong_turn")
 
     round_number = (draft.current_pick - 1) // len(seats) + 1
     session.add(

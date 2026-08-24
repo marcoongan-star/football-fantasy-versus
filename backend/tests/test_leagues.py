@@ -198,3 +198,38 @@ def test_snake_draft_rejects_wrong_turn_and_duplicate_player(client: TestClient)
     )
     assert duplicate.status_code == 409
     assert duplicate.json()["code"] == "player_unavailable"
+
+
+def test_snake_draft_retry_does_not_create_a_second_pick_or_advance_turn(
+    client: TestClient,
+) -> None:
+    league = create_league(client)
+    client.post(
+        "/v1/leagues/join",
+        json={"invite_code": league["invite_code"]},
+        headers=auth_headers(1),
+    )
+    client.post(
+        f"/v1/leagues/{league['id']}/draft/start",
+        headers=auth_headers(0, "Marco"),
+    )
+    request = {"player_id": "wirtz", "player_name": "Florian Wirtz"}
+
+    first = client.post(
+        f"/v1/leagues/{league['id']}/draft/picks",
+        json=request,
+        headers=auth_headers(0, "Marco"),
+    )
+    retry = client.post(
+        f"/v1/leagues/{league['id']}/draft/picks",
+        json=request,
+        headers=auth_headers(0, "Marco"),
+    )
+
+    assert first.status_code == retry.status_code == 200
+    assert retry.json()["current_pick"] == 2
+    assert [pick["player_id"] for pick in retry.json()["picks"]] == ["wirtz"]
+    audit = client.get(
+        f"/v1/leagues/{league['id']}/audit", headers=auth_headers(0, "Marco")
+    ).json()
+    assert sum(event["event_type"] == "draft.pick_made" for event in audit) == 1

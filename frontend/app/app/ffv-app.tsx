@@ -147,7 +147,7 @@ function DraftWorkspace({ draft, connection }: { draft: LeagueWorkspace["draft"]
         <div className="panel-title"><div><small>CURRENT TURN</small><h2>{currentManager}</h2></div><span className="locked-pill">Pick {draft.current_pick}</span></div>
         <div className="clock-orbit"><strong>{seconds}</strong><span>seconds</span></div>
         <p>The browser may display the countdown, but only the API accepts a pick, enforces unique ownership, and advances the cursor once.</p>
-        <div className="reconnect-proof"><small>RECONNECT CONTRACT</small><ol><li>Send last accepted pick: {syncedPick}</li><li>Fetch canonical draft state</li><li>Replace local board, never merge guesses</li></ol></div>
+        <div className="reconnect-proof"><small>RECONNECT CONTRACT</small><ol><li>Send last accepted pick: {syncedPick}</li><li>Retrying the same accepted player is safe</li><li>Replace local board, never merge guesses</li></ol></div>
         <button onClick={() => setSyncedPick(draft.current_pick - 1)}>Resync from server →</button>
       </aside>
     </div>
