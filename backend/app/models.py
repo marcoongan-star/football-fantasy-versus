@@ -132,6 +132,11 @@ class DraftPick(Base):
     __table_args__ = (
         UniqueConstraint("draft_session_id", "pick_number", name="uq_draft_pick_number"),
         UniqueConstraint("draft_session_id", "player_id", name="uq_draft_pick_player"),
+        UniqueConstraint(
+            "draft_session_id",
+            "client_command_id",
+            name="uq_draft_pick_client_command",
+        ),
         CheckConstraint("pick_number >= 1", name="ck_draft_pick_number"),
         CheckConstraint("round_number >= 1", name="ck_draft_round_number"),
     )
@@ -142,6 +147,7 @@ class DraftPick(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     player_id: Mapped[str] = mapped_column(String(80))
     player_name: Mapped[str] = mapped_column(String(120))
+    client_command_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     pick_number: Mapped[int] = mapped_column(Integer)
     round_number: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

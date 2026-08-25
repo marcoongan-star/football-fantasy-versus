@@ -337,6 +337,7 @@ def submit_draft_pick(
     league_id: str,
     principal: Principal,
     *,
+    client_command_id: str,
     player_id: str,
     player_name: str,
 ) -> DraftSession:
@@ -348,21 +349,42 @@ def submit_draft_pick(
     )
     if draft is None:
         raise DomainError("The draft has not started.", 409, "draft_not_started")
-    if draft.status != "active":
-        raise DomainError("The draft is complete.", 409, "draft_complete")
 
     seats = draft_seat_order(session, draft.id)
+    normalized_command_id = client_command_id.strip()
+    normalized_player_id = player_id.strip()
+    normalized_player_name = player_name.strip()
+    previous_command = session.scalar(
+        select(DraftPick).where(
+            DraftPick.draft_session_id == draft.id,
+            DraftPick.client_command_id == normalized_command_id,
+        )
+    )
+    if previous_command is not None:
+        if (
+            previous_command.user_id == membership.user_id
+            and previous_command.player_id == normalized_player_id
+            and previous_command.player_name == normalized_player_name
+        ):
+            return draft
+        raise DomainError(
+            "That command ID was already used for a different draft choice.",
+            409,
+            "draft_command_conflict",
+        )
+    if draft.status != "active":
+        raise DomainError("The draft is complete.", 409, "draft_complete")
     already_selected = session.scalar(
         select(DraftPick).where(
             DraftPick.draft_session_id == draft.id,
-            DraftPick.player_id == player_id.strip(),
+            DraftPick.player_id == normalized_player_id,
         )
     )
     if already_selected is not None:
         if (
             already_selected.user_id == membership.user_id
             and already_selected.pick_number == draft.current_pick - 1
-            and already_selected.player_name == player_name.strip()
+            and already_selected.player_name == normalized_player_name
         ):
             return draft
         raise DomainError("That player has already been drafted.", 409, "player_unavailable")
@@ -375,8 +397,9 @@ def submit_draft_pick(
             draft_session_id=draft.id,
             league_id=league_id,
             user_id=membership.user_id,
-            player_id=player_id.strip(),
-            player_name=player_name.strip(),
+            player_id=normalized_player_id,
+            player_name=normalized_player_name,
+            client_command_id=normalized_command_id,
             pick_number=draft.current_pick,
             round_number=round_number,
         )
@@ -386,7 +409,7 @@ def submit_draft_pick(
             league_id=league_id,
             actor_user_id=membership.user_id,
             event_type="draft.pick_made",
-            detail=f"Pick {draft.current_pick}: {player_name.strip()}.",
+            detail=f"Pick {draft.current_pick}: {normalized_player_name}.",
         )
     )
     draft.current_pick += 1

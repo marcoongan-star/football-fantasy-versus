@@ -269,6 +269,7 @@ def create_app(
                 session,
                 league_id,
                 principal,
+                client_command_id=payload.client_command_id,
                 player_id=payload.player_id,
                 player_name=payload.player_name,
             )

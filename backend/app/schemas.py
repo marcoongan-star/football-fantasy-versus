@@ -62,6 +62,7 @@ class AuditEventView(BaseModel):
 
 
 class DraftPickCreate(BaseModel):
+    client_command_id: str = Field(min_length=8, max_length=100)
     player_id: str = Field(min_length=1, max_length=80)
     player_name: str = Field(min_length=1, max_length=120)
 
