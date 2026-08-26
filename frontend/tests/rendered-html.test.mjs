@@ -63,3 +63,15 @@ test("server-renders the reconnectable draft room", async () => {
   assert.match(html, /Reuse that ID for every network retry/i);
   assert.match(html, /45 seconds per pick/i);
 });
+
+test("server-renders the blind FAAB workspace without exposing bids", async () => {
+  const response = await render("/app/league");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /Blind FAAB — FFV/);
+  assert.match(html, /YOUR BALANCE/i);
+  assert.match(html, /5:00 PM/);
+  assert.match(html, /Other bids hidden/i);
+  assert.match(html, /Equal amounts use hidden waiver priority/i);
+  assert.doesNotMatch(html, /Manager 1 bid|Manager 2 bid/i);
+});

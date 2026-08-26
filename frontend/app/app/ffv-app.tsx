@@ -102,7 +102,7 @@ export function FfvApp({ initialView = "career" }: { initialView?: "league" | "d
           </>
         )}
 
-        {view === "league" && <EmptyView eyebrow="PRIVATE, COMMISSIONER-CONTROLLED" title="League operations" copy="Create or join a league, rotate reusable invite codes, remove members, and inspect the audit history. Membership writes belong to the API—not the browser." action="Manage members" />}
+        {view === "league" && <FaabWorkspace />}
         {view === "draft" && <DraftWorkspace key={`${workspace.source}-${workspace.draft.current_pick}`} draft={workspace.draft} connection={connection} />}
       </section>
     </main>
@@ -155,6 +155,31 @@ function DraftWorkspace({ draft, connection }: { draft: LeagueWorkspace["draft"]
   </>;
 }
 
-function EmptyView({ eyebrow, title, copy, action }: { eyebrow: string; title: string; copy: string; action: string }) {
-  return <div className="empty-workspace"><span className="overline">{eyebrow}</span><h2>{title}</h2><p>{copy}</p><button>{action} →</button><small>Foundation view · write actions connect at the authentication milestone</small></div>;
+function FaabWorkspace() {
+  const [bid, setBid] = useState("24");
+  const [saved, setSaved] = useState(false);
+  return <>
+    <div className="faab-summary">
+      <article><small>YOUR BALANCE</small><strong>100</strong><span>FAAB remaining</span></article>
+      <article><small>WAIVER PRIORITY</small><strong>01</strong><span>hidden tie priority</span></article>
+      <article><small>NEXT PROCESSING</small><strong>5:00 PM</strong><span>America/New_York</span></article>
+    </div>
+    <div className="faab-grid">
+      <article className="workspace-panel faab-claim">
+        <div className="panel-title"><div><small>OPEN BLIND CLAIM</small><h2>Conor Bradley</h2></div><span className="locked-pill">Closes today</span></div>
+        <div className="faab-player"><span>RB</span><div><strong>Liverpool</strong><small>Seeded free-agent preview</small></div></div>
+        <form onSubmit={(event) => { event.preventDefault(); setSaved(true); }}>
+          <label>YOUR PRIVATE BID<div><input aria-label="Private FAAB bid" type="number" min="0" max="100" value={bid} onChange={(event) => { setBid(event.target.value); setSaved(false); }} /><span>FAAB</span></div></label>
+          <button type="submit">{saved ? "Bid saved privately ✓" : "Save blind bid →"}</button>
+        </form>
+        <p>{saved ? "Your amount is visible only to you until processing." : "You may update this bid before the 5 PM deadline."}</p>
+      </article>
+      <aside className="workspace-panel faab-privacy">
+        <div className="panel-title"><div><small>SEALED WINDOW</small><h2>Private until processed</h2></div></div>
+        <div className="sealed-bids"><span>••</span><strong>Other bids hidden</strong><small>Amounts and managers are revealed only in the final result.</small></div>
+        <ul><li>Equal amounts use hidden waiver priority.</li><li>One deterministic winner is always selected.</li><li>The winner pays only the displayed bid.</li></ul>
+      </aside>
+    </div>
+    <p className="workspace-disclaimer">Seeded recruiter preview. Private league bids are stored and resolved by the FastAPI service.</p>
+  </>;
 }
