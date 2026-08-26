@@ -67,6 +67,8 @@ class LeagueMember(Base):
         UniqueConstraint("league_id", "user_id", name="uq_league_member"),
         CheckConstraint("role IN ('commissioner', 'member')", name="ck_member_role"),
         CheckConstraint("status IN ('active', 'removed')", name="ck_member_status"),
+        CheckConstraint("faab_balance >= 0", name="ck_member_faab_balance"),
+        CheckConstraint("waiver_priority >= 1", name="ck_member_waiver_priority"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -74,6 +76,8 @@ class LeagueMember(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     role: Mapped[str] = mapped_column(String(20), default="member")
     status: Mapped[str] = mapped_column(String(20), default="active")
+    faab_balance: Mapped[int] = mapped_column(Integer, default=100)
+    waiver_priority: Mapped[int] = mapped_column(Integer, default=1)
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     removed_by_user_id: Mapped[str | None] = mapped_column(
@@ -151,6 +155,57 @@ class DraftPick(Base):
     pick_number: Mapped[int] = mapped_column(Integer)
     round_number: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class FaabWindow(Base):
+    __tablename__ = "faab_windows"
+    __table_args__ = (
+        CheckConstraint("status IN ('open', 'processed')", name="ck_faab_window_status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    league_id: Mapped[str] = mapped_column(ForeignKey("leagues.id"), index=True)
+    player_id: Mapped[str] = mapped_column(String(80))
+    player_name: Mapped[str] = mapped_column(String(120))
+    process_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="open")
+    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class FaabBid(Base):
+    __tablename__ = "faab_bids"
+    __table_args__ = (
+        UniqueConstraint("window_id", "user_id", name="uq_faab_bid_manager"),
+        UniqueConstraint("window_id", "client_command_id", name="uq_faab_bid_command"),
+        CheckConstraint("amount >= 0", name="ck_faab_bid_amount"),
+        CheckConstraint("waiver_priority_snapshot >= 1", name="ck_faab_bid_priority"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    window_id: Mapped[str] = mapped_column(ForeignKey("faab_windows.id"), index=True)
+    league_id: Mapped[str] = mapped_column(ForeignKey("leagues.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    amount: Mapped[int] = mapped_column(Integer)
+    waiver_priority_snapshot: Mapped[int] = mapped_column(Integer)
+    client_command_id: Mapped[str] = mapped_column(String(100))
+    priority_key: Mapped[str] = mapped_column(String(180), unique=True)
+    accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class FaabAward(Base):
+    __tablename__ = "faab_awards"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    window_id: Mapped[str] = mapped_column(
+        ForeignKey("faab_windows.id"), unique=True, index=True
+    )
+    league_id: Mapped[str] = mapped_column(ForeignKey("leagues.id"), index=True)
+    winning_bid_id: Mapped[str] = mapped_column(ForeignKey("faab_bids.id"), unique=True)
+    winner_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    amount: Mapped[int] = mapped_column(Integer)
+    processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class CareerMatch(Base):

@@ -87,6 +87,43 @@ class DraftStateView(BaseModel):
     picks: list[DraftPickView]
 
 
+class FaabWindowCreate(BaseModel):
+    player_id: str = Field(min_length=1, max_length=80)
+    player_name: str = Field(min_length=1, max_length=120)
+
+
+class FaabWindowView(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    league_id: str
+    player_id: str
+    player_name: str
+    process_at: datetime
+    status: str
+
+
+class FaabBidCreate(BaseModel):
+    client_command_id: str = Field(min_length=8, max_length=100)
+    amount: int = Field(ge=0, le=100)
+
+
+class FaabBidReceipt(BaseModel):
+    window_id: str
+    amount: int
+    faab_balance: int
+    status: str
+
+
+class FaabAwardView(BaseModel):
+    window_id: str
+    winner_user_id: str | None
+    amount: int | None
+    player_id: str
+    player_name: str
+    processed_at: datetime
+
+
 class CareerPlayerInput(BaseModel):
     player_id: str = Field(min_length=1, max_length=80)
     position: Position

@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import secrets
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -13,6 +15,9 @@ from .models import (
     DraftPick,
     DraftSeat,
     DraftSession,
+    FaabAward,
+    FaabBid,
+    FaabWindow,
     League,
     LeagueMember,
     User,
@@ -75,6 +80,8 @@ def create_league(session: Session, principal: Principal, name: str) -> tuple[Le
             user_id=user.id,
             role="commissioner",
             status="active",
+            faab_balance=100,
+            waiver_priority=1,
         )
     )
     session.add(
@@ -124,7 +131,14 @@ def join_league(session: Session, principal: Principal, invite_code: str) -> Lea
     if int(active_count or 0) >= league.max_members:
         raise DomainError("This league already has 15 managers.", 409, "league_full")
 
-    session.add(LeagueMember(league_id=league.id, user_id=user.id))
+    session.add(
+        LeagueMember(
+            league_id=league.id,
+            user_id=user.id,
+            faab_balance=100,
+            waiver_priority=int(active_count or 0) + 1,
+        )
+    )
     session.add(
         AuditEvent(
             league_id=league.id,
@@ -417,3 +431,248 @@ def submit_draft_pick(
         draft.status = "complete"
     session.flush()
     return draft
+
+
+NEW_YORK = ZoneInfo("America/New_York")
+
+
+def next_faab_process_at(now: datetime) -> datetime:
+    if now.tzinfo is None:
+        raise ValueError("now must include a timezone")
+    local_now = now.astimezone(NEW_YORK)
+    local_process = local_now.replace(hour=17, minute=0, second=0, microsecond=0)
+    if local_now >= local_process:
+        local_process += timedelta(days=1)
+    return local_process.astimezone(timezone.utc)
+
+
+def _aware_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
+def create_faab_window(
+    session: Session,
+    league_id: str,
+    principal: Principal,
+    *,
+    player_id: str,
+    player_name: str,
+    now: datetime | None = None,
+) -> FaabWindow:
+    league, commissioner = require_commissioner(session, league_id, principal)
+    accepted_at = now or utc_now()
+    existing = session.scalar(
+        select(FaabWindow).where(
+            FaabWindow.league_id == league.id,
+            FaabWindow.player_id == player_id.strip(),
+            FaabWindow.status == "open",
+        )
+    )
+    if existing is not None:
+        return existing
+    window = FaabWindow(
+        league_id=league.id,
+        player_id=player_id.strip(),
+        player_name=player_name.strip(),
+        process_at=next_faab_process_at(accepted_at),
+        created_by_user_id=commissioner.id,
+        created_at=accepted_at,
+    )
+    session.add(window)
+    session.flush()
+    session.add(
+        AuditEvent(
+            league_id=league.id,
+            actor_user_id=commissioner.id,
+            event_type="faab.window_opened",
+            detail=f"Blind claim window opened for {window.player_name}; processing is scheduled for 5 PM New York.",
+        )
+    )
+    return window
+
+
+def submit_faab_bid(
+    session: Session,
+    league_id: str,
+    window_id: str,
+    principal: Principal,
+    *,
+    amount: int,
+    client_command_id: str,
+    now: datetime | None = None,
+) -> tuple[FaabBid, LeagueMember]:
+    membership = require_active_member(session, league_id, principal)
+    accepted_at = now or utc_now()
+    window = session.scalar(
+        select(FaabWindow)
+        .where(FaabWindow.id == window_id, FaabWindow.league_id == league_id)
+        .with_for_update()
+    )
+    if window is None:
+        raise DomainError("FAAB window not found.", 404, "faab_window_not_found")
+    normalized_command_id = client_command_id.strip()
+    previous_command = session.scalar(
+        select(FaabBid).where(
+            FaabBid.window_id == window.id,
+            FaabBid.client_command_id == normalized_command_id,
+        )
+    )
+    if previous_command is not None:
+        if previous_command.user_id == membership.user_id and previous_command.amount == amount:
+            return previous_command, membership
+        raise DomainError(
+            "That command ID was already used for a different bid.",
+            409,
+            "faab_command_conflict",
+        )
+    if window.status != "open" or accepted_at >= _aware_utc(window.process_at):
+        raise DomainError("This FAAB window is closed.", 409, "faab_window_closed")
+    if amount < 0 or amount > membership.faab_balance:
+        raise DomainError("Bid exceeds the available FAAB balance.", 409, "faab_balance_exceeded")
+    existing = session.scalar(
+        select(FaabBid).where(
+            FaabBid.window_id == window.id,
+            FaabBid.user_id == membership.user_id,
+        )
+    )
+    if existing is None:
+        bid = FaabBid(
+            window_id=window.id,
+            league_id=league_id,
+            user_id=membership.user_id,
+            amount=amount,
+            waiver_priority_snapshot=membership.waiver_priority,
+            client_command_id=normalized_command_id,
+            priority_key="pending",
+            accepted_at=accepted_at,
+        )
+        session.add(bid)
+        session.flush()
+    else:
+        bid = existing
+        bid.amount = amount
+        bid.waiver_priority_snapshot = membership.waiver_priority
+        bid.client_command_id = normalized_command_id
+        bid.accepted_at = accepted_at
+    timestamp_key = int(_aware_utc(accepted_at).timestamp() * 1_000_000)
+    bid.priority_key = f"{membership.waiver_priority:04d}:{timestamp_key:020d}:{bid.id}"
+    session.add(
+        AuditEvent(
+            league_id=league_id,
+            actor_user_id=membership.user_id,
+            event_type="faab.bid_saved",
+            detail=f"Blind bid saved for window {window.id}; amount remains private until processing.",
+        )
+    )
+    session.flush()
+    return bid, membership
+
+
+def process_faab_window(
+    session: Session,
+    league_id: str,
+    window_id: str,
+    principal: Principal,
+    *,
+    now: datetime | None = None,
+) -> tuple[FaabWindow, FaabAward | None]:
+    league, commissioner = require_commissioner(session, league_id, principal)
+    processed_at = now or utc_now()
+    window = session.scalar(
+        select(FaabWindow)
+        .where(FaabWindow.id == window_id, FaabWindow.league_id == league.id)
+        .with_for_update()
+    )
+    if window is None:
+        raise DomainError("FAAB window not found.", 404, "faab_window_not_found")
+    existing_award = session.scalar(
+        select(FaabAward).where(FaabAward.window_id == window.id)
+    )
+    if window.status == "processed":
+        return window, existing_award
+    if processed_at < _aware_utc(window.process_at):
+        raise DomainError(
+            "FAAB processing begins at 5 PM New York.",
+            409,
+            "faab_processing_early",
+        )
+    ranked_bids = list(
+        session.scalars(
+            select(FaabBid)
+            .join(
+                LeagueMember,
+                (LeagueMember.league_id == FaabBid.league_id)
+                & (LeagueMember.user_id == FaabBid.user_id),
+            )
+            .where(
+                FaabBid.window_id == window.id,
+                LeagueMember.status == "active",
+                LeagueMember.faab_balance >= FaabBid.amount,
+            )
+            .order_by(
+                FaabBid.amount.desc(),
+                FaabBid.waiver_priority_snapshot,
+                FaabBid.accepted_at,
+                FaabBid.id,
+            )
+        )
+    )
+    award = None
+    if ranked_bids:
+        winner = ranked_bids[0]
+        winner_membership = session.scalar(
+            select(LeagueMember)
+            .where(
+                LeagueMember.league_id == league.id,
+                LeagueMember.user_id == winner.user_id,
+            )
+            .with_for_update()
+        )
+        if winner_membership is None:
+            raise DomainError("Winning membership not found.", 409, "faab_member_missing")
+        winner_membership.faab_balance -= winner.amount
+        old_priority = winner_membership.waiver_priority
+        active_members = list(
+            session.scalars(
+                select(LeagueMember).where(
+                    LeagueMember.league_id == league.id,
+                    LeagueMember.status == "active",
+                )
+            )
+        )
+        for member in active_members:
+            if member.user_id == winner.user_id:
+                member.waiver_priority = len(active_members)
+            elif member.waiver_priority > old_priority:
+                member.waiver_priority -= 1
+        award = FaabAward(
+            window_id=window.id,
+            league_id=league.id,
+            winning_bid_id=winner.id,
+            winner_user_id=winner.user_id,
+            amount=winner.amount,
+            processed_at=processed_at,
+        )
+        session.add(award)
+        session.add(
+            AuditEvent(
+                league_id=league.id,
+                actor_user_id=commissioner.id,
+                subject_user_id=winner.user_id,
+                event_type="faab.player_awarded",
+                detail=f"{window.player_name} awarded for {winner.amount} FAAB.",
+            )
+        )
+    else:
+        session.add(
+            AuditEvent(
+                league_id=league.id,
+                actor_user_id=commissioner.id,
+                event_type="faab.window_closed_empty",
+                detail=f"No eligible bid for {window.player_name}.",
+            )
+        )
+    window.status = "processed"
+    window.processed_at = processed_at
+    session.flush()
+    return window, award

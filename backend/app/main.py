@@ -10,12 +10,17 @@ from sqlalchemy.orm import Session, selectinload
 from .auth import Principal, current_principal
 from .career_api import install_career_routes
 from .database import Database
-from .models import AuditEvent, DraftPick, DraftSession, League, LeagueMember
+from .models import AuditEvent, DraftPick, DraftSession, FaabWindow, League, LeagueMember
 from .schemas import (
     AuditEventView,
     DraftPickCreate,
     DraftPickView,
     DraftStateView,
+    FaabAwardView,
+    FaabBidCreate,
+    FaabBidReceipt,
+    FaabWindowCreate,
+    FaabWindowView,
     InviteRotated,
     JoinLeague,
     LeagueCreate,
@@ -26,13 +31,16 @@ from .schemas import (
 from .services import (
     DomainError,
     create_league,
+    create_faab_window,
     draft_seat_order,
     expected_drafter,
     join_league,
+    process_faab_window,
     remove_member,
     require_active_member,
     restore_member,
     start_snake_draft,
+    submit_faab_bid,
     submit_draft_pick,
     revoke_invite,
     rotate_invite,
@@ -274,6 +282,78 @@ def create_app(
                 player_name=payload.player_name,
             )
         return _draft_view(session, draft)
+
+    @app.post(
+        "/v1/leagues/{league_id}/faab/windows",
+        response_model=FaabWindowView,
+        status_code=201,
+    )
+    def open_faab_window_endpoint(
+        league_id: str,
+        payload: FaabWindowCreate,
+        principal: Principal = Depends(current_principal),
+        session: Session = Depends(session_dependency),
+    ) -> FaabWindow:
+        with session.begin():
+            return create_faab_window(
+                session,
+                league_id,
+                principal,
+                player_id=payload.player_id,
+                player_name=payload.player_name,
+            )
+
+    @app.post(
+        "/v1/leagues/{league_id}/faab/windows/{window_id}/bids",
+        response_model=FaabBidReceipt,
+    )
+    def save_faab_bid_endpoint(
+        league_id: str,
+        window_id: str,
+        payload: FaabBidCreate,
+        principal: Principal = Depends(current_principal),
+        session: Session = Depends(session_dependency),
+    ) -> FaabBidReceipt:
+        with session.begin():
+            bid, membership = submit_faab_bid(
+                session,
+                league_id,
+                window_id,
+                principal,
+                amount=payload.amount,
+                client_command_id=payload.client_command_id,
+            )
+        return FaabBidReceipt(
+            window_id=bid.window_id,
+            amount=bid.amount,
+            faab_balance=membership.faab_balance,
+            status="saved",
+        )
+
+    @app.post(
+        "/v1/leagues/{league_id}/faab/windows/{window_id}/process",
+        response_model=FaabAwardView,
+    )
+    def process_faab_window_endpoint(
+        league_id: str,
+        window_id: str,
+        principal: Principal = Depends(current_principal),
+        session: Session = Depends(session_dependency),
+    ) -> FaabAwardView:
+        with session.begin():
+            window, award = process_faab_window(
+                session, league_id, window_id, principal
+            )
+        if window.processed_at is None:
+            raise HTTPException(status_code=500, detail="FAAB processing timestamp missing.")
+        return FaabAwardView(
+            window_id=window.id,
+            winner_user_id=award.winner_user_id if award else None,
+            amount=award.amount if award else None,
+            player_id=window.player_id,
+            player_name=window.player_name,
+            processed_at=window.processed_at,
+        )
 
     return app
 
