@@ -127,6 +127,39 @@ def test_public_demo_needs_no_login_but_private_routes_do(client: TestClient) ->
     assert client.post("/v1/leagues", json={"name": "Private League"}).status_code == 401
 
 
+def test_lists_only_the_authenticated_users_active_leagues(client: TestClient) -> None:
+    first = client.post(
+        "/v1/leagues", json={"name": "Wirtz First XI"}, headers=auth_headers(0, "Marco")
+    ).json()
+    second = client.post(
+        "/v1/leagues", json={"name": "Pressing Lab"}, headers=auth_headers(1, "Amina")
+    ).json()
+    client.post(
+        "/v1/leagues/join",
+        json={"invite_code": second["invite_code"]},
+        headers=auth_headers(0, "Marco"),
+    )
+
+    response = client.get("/v1/leagues", headers=auth_headers(0, "Marco"))
+
+    assert response.status_code == 200
+    assert {league["id"] for league in response.json()} == {first["id"], second["id"]}
+
+
+def test_local_frontend_origin_can_preflight_authenticated_requests(client: TestClient) -> None:
+    response = client.options(
+        "/v1/leagues",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "x-user-id,x-user-name",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+
+
 def test_private_league_and_audit_require_active_membership(client: TestClient) -> None:
     league = create_league(client)
     outsider = auth_headers(42)
