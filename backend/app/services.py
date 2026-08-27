@@ -63,6 +63,29 @@ def get_or_create_user(session: Session, principal: Principal) -> User:
     return user
 
 
+def list_active_leagues(session: Session, principal: Principal) -> list[League]:
+    """Return leagues where the authenticated user currently has access."""
+    user = session.scalar(
+        select(User).where(
+            User.auth_provider == principal.provider,
+            User.provider_subject == principal.subject,
+        )
+    )
+    if user is None:
+        return []
+    return list(
+        session.scalars(
+            select(League)
+            .join(LeagueMember, LeagueMember.league_id == League.id)
+            .where(
+                LeagueMember.user_id == user.id,
+                LeagueMember.status == "active",
+            )
+            .order_by(League.created_at.desc(), League.id)
+        )
+    )
+
+
 def create_league(session: Session, principal: Principal, name: str) -> tuple[League, str]:
     user = get_or_create_user(session, principal)
     invite_code = _new_invite_code()

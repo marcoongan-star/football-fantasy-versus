@@ -4,6 +4,7 @@ import os
 from collections.abc import Generator
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -35,6 +36,7 @@ from .services import (
     draft_seat_order,
     expected_drafter,
     join_league,
+    list_active_leagues,
     process_faab_window,
     remove_member,
     require_active_member,
@@ -130,6 +132,18 @@ def create_app(
     )
     app.state.database = database
     app.state.auth_mode = auth_mode or os.getenv("FFV_AUTH_MODE", "development")
+    configured_origins = os.getenv("FFV_ALLOWED_ORIGINS", "")
+    allowed_origins = [origin.strip() for origin in configured_origins.split(",") if origin.strip()]
+    if app.state.auth_mode == "development" and not allowed_origins:
+        allowed_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    if allowed_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=allowed_origins,
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+            allow_headers=["Content-Type", "X-User-Id", "X-User-Name", "X-User-Email"],
+        )
 
     def session_dependency() -> Generator[Session, None, None]:
         yield from database.session()
@@ -159,6 +173,13 @@ def create_app(
             league, invite_code = create_league(session, principal, payload.name)
         view = _league_view(session, league.id)
         return LeagueCreated(**view.model_dump(), invite_code=invite_code)
+
+    @app.get("/v1/leagues", response_model=list[LeagueView])
+    def get_my_leagues(
+        principal: Principal = Depends(current_principal),
+        session: Session = Depends(session_dependency),
+    ) -> list[LeagueView]:
+        return [_league_view(session, league.id) for league in list_active_leagues(session, principal)]
 
     @app.post("/v1/leagues/join", response_model=LeagueView)
     def join_league_endpoint(
