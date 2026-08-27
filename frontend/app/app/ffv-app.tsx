@@ -2,7 +2,21 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { demoWorkspace, loadLeagueWorkspace, type LeagueWorkspace } from "./ffv-api";
+import {
+  createLeague,
+  demoWorkspace,
+  isApiConfigured,
+  joinLeague,
+  listMyLeagues,
+  loadLeagueWorkspace,
+  startDraft,
+  type DraftState,
+  type LeagueCreated,
+  type LeagueRecord,
+  type LeagueWorkspace,
+} from "./ffv-api";
+
+type Connection = "loading" | "api" | "demo" | "error";
 
 const managerNames: Record<string, string> = {
   marco: "Wirtz Case Scenario",
@@ -15,14 +29,34 @@ export function FfvApp({ initialView = "career" }: { initialView?: "league" | "d
   const [view, setView] = useState<"league" | "draft" | "career">(initialView);
   const [asOf, setAsOf] = useState<"current" | "7" | "8">("current");
   const [workspace, setWorkspace] = useState<LeagueWorkspace>(demoWorkspace());
-  const [connection, setConnection] = useState<"loading" | "api" | "demo">(
-    process.env.NEXT_PUBLIC_FFV_API_URL ? "loading" : "demo",
-  );
+  const apiConfigured = isApiConfigured();
+  const [connection, setConnection] = useState<Connection>(apiConfigured ? "loading" : "demo");
+  const [leagues, setLeagues] = useState<LeagueRecord[]>([]);
+  const [selectedLeagueId, setSelectedLeagueId] = useState(process.env.NEXT_PUBLIC_FFV_LEAGUE_ID ?? "");
+  const [accessError, setAccessError] = useState("");
+  const [newInvite, setNewInvite] = useState("");
 
   useEffect(() => {
+    if (!apiConfigured) return;
+    const controller = new AbortController();
+    listMyLeagues(controller.signal)
+      .then((available) => {
+        setLeagues(available);
+        setSelectedLeagueId((current) => current || available[0]?.id || "");
+        setConnection("api");
+      })
+      .catch((error: Error) => {
+        setAccessError(error.message);
+        setConnection("error");
+      });
+    return () => controller.abort();
+  }, [apiConfigured]);
+
+  useEffect(() => {
+    if (!apiConfigured || !selectedLeagueId) return;
     const controller = new AbortController();
     loadLeagueWorkspace(
-      process.env.NEXT_PUBLIC_FFV_LEAGUE_ID ?? "",
+      selectedLeagueId,
       asOf === "current" ? null : Number(asOf),
       controller.signal,
     )
@@ -30,23 +64,43 @@ export function FfvApp({ initialView = "career" }: { initialView?: "league" | "d
         setWorkspace(next);
         setConnection(next.source === "api" ? "api" : "demo");
       })
-      .catch(() => {
-        setWorkspace(demoWorkspace());
-        setConnection("demo");
+      .catch((error: Error) => {
+        setAccessError(error.message);
+        setConnection("error");
       });
     return () => controller.abort();
-  }, [asOf]);
+  }, [apiConfigured, asOf, selectedLeagueId]);
+
+  function selectLeague(leagueId: string) {
+    setAccessError("");
+    setConnection("loading");
+    setSelectedLeagueId(leagueId);
+  }
+
+  function acceptLeague(league: LeagueRecord | LeagueCreated) {
+    setLeagues((current) => [league, ...current.filter((item) => item.id !== league.id)]);
+    setSelectedLeagueId(league.id);
+    setNewInvite("invite_code" in league ? league.invite_code : "");
+    setAccessError("");
+    setView("league");
+  }
 
   const visibleMatches = useMemo(() => {
     if (asOf === "current") return workspace.matches;
     return workspace.matches.filter((match) => match.gameweek <= Number(asOf));
   }, [asOf, workspace.matches]);
+  const realManagerNames = useMemo(
+    () => Object.fromEntries(workspace.league.members.map((member) => [member.user_id, member.display_name])),
+    [workspace.league.members],
+  );
+  const displayNames = { ...managerNames, ...realManagerNames };
+  const hasSelectedLeague = !apiConfigured || Boolean(selectedLeagueId);
 
   return (
     <main className="ffv-workspace">
       <aside className="app-sidebar">
         <Link href="/" className="app-logo"><span>FFV</span><small>Football Fantasy Versus</small></Link>
-        <div className="league-switcher"><small>ACTIVE LEAGUE</small><strong>{workspace.leagueName}</strong><span>8 of 15 managers</span></div>
+        <div className="league-switcher"><small>ACTIVE LEAGUE</small><strong>{hasSelectedLeague ? workspace.leagueName : "Choose a league"}</strong><span>{hasSelectedLeague ? `${workspace.league.active_member_count} of ${workspace.league.max_members} managers` : "Create one or enter an invite"}</span></div>
         <nav aria-label="League workspace">
           {(["league", "draft", "career"] as const).map((item) => (
             <button key={item} className={view === item ? "active" : ""} onClick={() => setView(item)}>
@@ -60,10 +114,16 @@ export function FfvApp({ initialView = "career" }: { initialView?: "league" | "d
       <section className="app-content">
         <header className="app-topline">
           <div><span className="overline">LEAGUE WORKSPACE</span><h1>{view === "career" ? "Career command centre" : view === "draft" ? "Draft room" : "League overview"}</h1></div>
-          <div className={`source-badge ${connection}`}><span />{connection === "api" ? "Live API" : connection === "loading" ? "Checking API" : "Seeded preview"}</div>
+          <div className="app-top-actions">
+            {apiConfigured && leagues.length > 0 && <select aria-label="Active league" value={selectedLeagueId} onChange={(event) => selectLeague(event.target.value)}><option value="">Choose league</option>{leagues.map((league) => <option key={league.id} value={league.id}>{league.name}</option>)}</select>}
+            <div className={`source-badge ${connection}`}><span />{connection === "api" ? "Persistent API" : connection === "loading" ? "Syncing" : connection === "error" ? "API needs attention" : "Seeded preview"}</div>
+          </div>
         </header>
 
-        {view === "career" && (
+        {apiConfigured && !hasSelectedLeague && <LeagueAccessPanel onAccepted={acceptLeague} error={accessError} />}
+        {connection === "error" && hasSelectedLeague && <div className="app-error" role="alert"><strong>Could not sync this league.</strong><span>{accessError}</span></div>}
+
+        {hasSelectedLeague && view === "career" && (
           <>
             <div className="career-summary">
               <article><small>YOUR POSITION</small><strong>1<sup>st</sup></strong><span>16 points</span></article>
@@ -74,11 +134,11 @@ export function FfvApp({ initialView = "career" }: { initialView?: "league" | "d
 
             <div className="workspace-grid">
               <article className="workspace-panel standings-panel">
-                <div className="panel-title"><div><small>SEPARATE CAREER TABLE</small><h2>Standings</h2></div><select aria-label="Standings snapshot" value={asOf} onChange={(event) => setAsOf(event.target.value as typeof asOf)}><option value="current">Current</option><option value="8">After GW 8</option><option value="7">After GW 7</option></select></div>
+                <div className="panel-title"><div><small>SEPARATE CAREER TABLE</small><h2>Standings</h2></div><select aria-label="Standings snapshot" value={asOf} onChange={(event) => { setConnection("loading"); setAsOf(event.target.value as typeof asOf); }}><option value="current">Current</option><option value="8">After GW 8</option><option value="7">After GW 7</option></select></div>
                 <div className="table-head"><span>POS</span><span>CLUB</span><span>P</span><span>GD</span><span>PTS</span></div>
                 {workspace.standings.map((row) => (
                   <div className={`standing-row ${row.user_id === "marco" ? "mine" : ""}`} key={row.user_id}>
-                    <span>{row.position}</span><strong>{managerNames[row.user_id] ?? row.user_id}</strong><span>{row.played}</span><span>{row.goal_difference > 0 ? "+" : ""}{row.goal_difference}</span><b>{row.points}</b>
+                    <span>{row.position}</span><strong>{displayNames[row.user_id] ?? row.user_id}</strong><span>{row.played}</span><span>{row.goal_difference > 0 ? "+" : ""}{row.goal_difference}</span><b>{row.points}</b>
                   </div>
                 ))}
                 <p className="source-note">{workspace.updatedLabel}. Stored match facts are the source of truth; the table is rebuilt from them.</p>
@@ -102,16 +162,51 @@ export function FfvApp({ initialView = "career" }: { initialView?: "league" | "d
           </>
         )}
 
-        {view === "league" && <FaabWorkspace />}
-        {view === "draft" && <DraftWorkspace key={`${workspace.source}-${workspace.draft.current_pick}`} draft={workspace.draft} connection={connection} />}
+        {hasSelectedLeague && view === "league" && <>{apiConfigured && <LeagueAccessPanel onAccepted={acceptLeague} error={accessError} newInvite={newInvite} />}<FaabWorkspace /></>}
+        {hasSelectedLeague && view === "draft" && <DraftWorkspace key={`${workspace.source}-${workspace.draft?.current_pick ?? "pending"}`} draft={workspace.draft} connection={connection} leagueId={workspace.league.id} managerNames={displayNames} onStarted={(draft) => setWorkspace((current) => ({ ...current, draft }))} />}
       </section>
     </main>
   );
 }
 
-function DraftWorkspace({ draft, connection }: { draft: LeagueWorkspace["draft"]; connection: "loading" | "api" | "demo" }) {
+function LeagueAccessPanel({ onAccepted, error, newInvite = "" }: { onAccepted: (league: LeagueRecord | LeagueCreated) => void; error: string; newInvite?: string }) {
+  const [leagueName, setLeagueName] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
+  const [busy, setBusy] = useState<"create" | "join" | null>(null);
+  const [localError, setLocalError] = useState("");
+
+  async function run(action: "create" | "join") {
+    setBusy(action);
+    setLocalError("");
+    try {
+      const league = action === "create" ? await createLeague(leagueName) : await joinLeague(inviteCode);
+      onAccepted(league);
+      setLeagueName("");
+      setInviteCode("");
+    } catch (requestError) {
+      setLocalError(requestError instanceof Error ? requestError.message : "FFV could not save that request.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return <article className="workspace-panel league-access-panel">
+    <div className="panel-title"><div><small>PERSISTENT LEAGUE ACCESS</small><h2>Create or join</h2></div><span>Maximum 15 managers</span></div>
+    <div className="league-access-grid">
+      <form onSubmit={(event) => { event.preventDefault(); void run("create"); }}><label>NEW LEAGUE NAME<input value={leagueName} minLength={3} maxLength={80} required placeholder="Wirtz Case Scenario" onChange={(event) => setLeagueName(event.target.value)} /></label><button disabled={busy !== null}>{busy === "create" ? "Creating…" : "Create league →"}</button></form>
+      <div className="access-divider"><span>OR</span></div>
+      <form onSubmit={(event) => { event.preventDefault(); void run("join"); }}><label>COMMISSIONER INVITE<input value={inviteCode} minLength={8} maxLength={40} required placeholder="FFV-ABCDE-12345" onChange={(event) => setInviteCode(event.target.value.toUpperCase())} /></label><button disabled={busy !== null}>{busy === "join" ? "Joining…" : "Join league →"}</button></form>
+    </div>
+    {newInvite && <div className="invite-result"><small>SHARE THIS COMMISSIONER INVITE</small><strong>{newInvite}</strong><span>It is shown after creation so you can copy it to your league members.</span></div>}
+    {(localError || error) && <p className="form-error" role="alert">{localError || error}</p>}
+  </article>;
+}
+
+function DraftWorkspace({ draft, connection, leagueId, managerNames: names, onStarted }: { draft: LeagueWorkspace["draft"]; connection: Connection; leagueId: string; managerNames: Record<string, string>; onStarted: (draft: DraftState) => void }) {
+  const [startError, setStartError] = useState("");
+  const [starting, setStarting] = useState(false);
   const [seconds, setSeconds] = useState(32);
-  const [syncedPick, setSyncedPick] = useState(draft.current_pick - 1);
+  const [syncedPick, setSyncedPick] = useState((draft?.current_pick ?? 1) - 1);
 
   useEffect(() => {
     if (seconds <= 0) return;
@@ -119,7 +214,9 @@ function DraftWorkspace({ draft, connection }: { draft: LeagueWorkspace["draft"]
     return () => window.clearTimeout(timer);
   }, [seconds]);
 
-  const currentManager = draft.current_user_id ? managerNames[draft.current_user_id] ?? draft.current_user_id : "Draft complete";
+  if (!draft) return <article className="workspace-panel empty-draft-panel"><small>DRAFT NOT STARTED</small><h2>Your league is ready for members</h2><p>Share the commissioner invite, wait for at least two active managers, then start the server-authoritative 15-round snake draft.</p><button disabled={starting || connection !== "api"} onClick={() => { setStarting(true); setStartError(""); void startDraft(leagueId).then(onStarted).catch((error: Error) => setStartError(error.message)).finally(() => setStarting(false)); }}>{starting ? "Starting…" : "Start league draft →"}</button>{startError && <p className="form-error" role="alert">{startError}</p>}</article>;
+
+  const currentManager = draft.current_user_id ? names[draft.current_user_id] ?? draft.current_user_id : "Draft complete";
 
   return <>
     <div className="draft-command-strip">
@@ -137,7 +234,7 @@ function DraftWorkspace({ draft, connection }: { draft: LeagueWorkspace["draft"]
               const orderedIndex = round % 2 === 1 ? seatIndex : draft.seat_order.length - 1 - seatIndex;
               const pickNumber = (round - 1) * draft.seat_order.length + orderedIndex + 1;
               const pick = draft.picks.find((item) => item.pick_number === pickNumber);
-              return <article className={pickNumber === draft.current_pick ? "on-clock" : pick ? "accepted" : "waiting"} key={pickNumber}><small>#{pickNumber}</small><strong>{pick?.player_name ?? (pickNumber === draft.current_pick ? "ON THE CLOCK" : "Waiting")}</strong><span>{managerNames[pick?.user_id ?? manager] ?? pick?.user_id ?? manager}</span></article>;
+              return <article className={pickNumber === draft.current_pick ? "on-clock" : pick ? "accepted" : "waiting"} key={pickNumber}><small>#{pickNumber}</small><strong>{pick?.player_name ?? (pickNumber === draft.current_pick ? "ON THE CLOCK" : "Waiting")}</strong><span>{names[pick?.user_id ?? manager] ?? pick?.user_id ?? manager}</span></article>;
             })}
           </div></section>)}
         </div>

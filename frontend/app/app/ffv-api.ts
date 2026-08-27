@@ -27,12 +27,35 @@ export type CareerMatch = {
 
 export type LeagueWorkspace = {
   source: "api" | "seeded-demo";
+  league: LeagueRecord;
   leagueName: string;
   updatedLabel: string;
   standings: CareerStanding[];
   matches: CareerMatch[];
-  draft: DraftState;
+  draft: DraftState | null;
 };
+
+export type LeagueMember = {
+  user_id: string;
+  display_name: string;
+  role: "commissioner" | "member";
+  status: "active" | "removed";
+  joined_at: string;
+  removed_at: string | null;
+};
+
+export type LeagueRecord = {
+  id: string;
+  name: string;
+  commissioner_user_id: string;
+  max_members: number;
+  active_member_count: number;
+  invite_enabled: boolean;
+  invite_version: number;
+  members: LeagueMember[];
+};
+
+export type LeagueCreated = LeagueRecord & { invite_code: string };
 
 export type DraftPick = {
   pick_number: number;
@@ -75,6 +98,16 @@ const seededDraft: DraftState = {
 
 const seededWorkspace: LeagueWorkspace = {
   source: "seeded-demo",
+  league: {
+    id: "seeded-league",
+    name: "The Gegenpress Society",
+    commissioner_user_id: "marco",
+    max_members: 15,
+    active_member_count: 8,
+    invite_enabled: true,
+    invite_version: 1,
+    members: [],
+  },
   leagueName: "The Gegenpress Society",
   updatedLabel: "Seeded recruiter preview",
   standings: [
@@ -95,37 +128,95 @@ export function demoWorkspace(): LeagueWorkspace {
   return seededWorkspace;
 }
 
+function apiBaseUrl(): string | null {
+  return process.env.NEXT_PUBLIC_FFV_API_URL?.replace(/\/$/, "") || null;
+}
+
+function developmentIdentityHeaders(): Record<string, string> {
+  const subject = process.env.NEXT_PUBLIC_FFV_DEMO_USER_ID;
+  if (!subject) return {};
+  return {
+    "X-User-Id": subject,
+    "X-User-Name": process.env.NEXT_PUBLIC_FFV_DEMO_USER_NAME ?? "Local manager",
+  };
+}
+
+async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const baseUrl = apiBaseUrl();
+  if (!baseUrl) throw new Error("The FFV API URL is not configured.");
+  const response = await fetch(`${baseUrl}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...developmentIdentityHeaders(),
+      ...init.headers,
+    },
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { detail?: string } | null;
+    throw new Error(payload?.detail ?? `FFV request failed (${response.status}).`);
+  }
+  return response.json() as Promise<T>;
+}
+
+export function isApiConfigured(): boolean {
+  return Boolean(apiBaseUrl());
+}
+
+export function listMyLeagues(signal?: AbortSignal): Promise<LeagueRecord[]> {
+  return apiRequest<LeagueRecord[]>("/v1/leagues", { signal });
+}
+
+export function createLeague(name: string): Promise<LeagueCreated> {
+  return apiRequest<LeagueCreated>("/v1/leagues", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export function joinLeague(inviteCode: string): Promise<LeagueRecord> {
+  return apiRequest<LeagueRecord>("/v1/leagues/join", {
+    method: "POST",
+    body: JSON.stringify({ invite_code: inviteCode }),
+  });
+}
+
+export function startDraft(leagueId: string): Promise<DraftState> {
+  return apiRequest<DraftState>(`/v1/leagues/${leagueId}/draft/start`, { method: "POST" });
+}
+
 export async function loadLeagueWorkspace(
   leagueId: string,
   gameweek: number | null,
   signal?: AbortSignal,
 ): Promise<LeagueWorkspace> {
-  const baseUrl = process.env.NEXT_PUBLIC_FFV_API_URL?.replace(/\/$/, "");
+  const baseUrl = apiBaseUrl();
   if (!baseUrl || !leagueId) return seededWorkspace;
 
-  const headers = {
-    "X-User-Id": process.env.NEXT_PUBLIC_FFV_DEMO_USER_ID ?? "marco",
-    "X-User-Name": "Marco",
-  };
   const standingPath = gameweek
     ? `/v1/leagues/${leagueId}/career/standings/as-of/${gameweek}`
     : `/v1/leagues/${leagueId}/career/standings`;
+  const headers = developmentIdentityHeaders();
   const [leagueResponse, standingResponse, matchResponse, draftResponse] = await Promise.all([
     fetch(`${baseUrl}/v1/leagues/${leagueId}`, { headers, signal }),
     fetch(`${baseUrl}${standingPath}`, { headers, signal }),
     fetch(`${baseUrl}/v1/leagues/${leagueId}/career/matches`, { headers, signal }),
     fetch(`${baseUrl}/v1/leagues/${leagueId}/draft`, { headers, signal }),
   ]);
-  if (![leagueResponse, standingResponse, matchResponse, draftResponse].every((response) => response.ok)) {
+  if (![leagueResponse, standingResponse, matchResponse].every((response) => response.ok)) {
     throw new Error("The league API did not return a complete workspace.");
   }
-  const league = (await leagueResponse.json()) as { name: string };
+  if (!draftResponse.ok && draftResponse.status !== 404) {
+    throw new Error("The league API could not load the draft state.");
+  }
+  const league = (await leagueResponse.json()) as LeagueRecord;
   return {
     source: "api",
+    league,
     leagueName: league.name,
     updatedLabel: gameweek ? `Official table after GW ${gameweek}` : "Current official table",
     standings: (await standingResponse.json()) as CareerStanding[],
     matches: (await matchResponse.json()) as CareerMatch[],
-    draft: (await draftResponse.json()) as DraftState,
+    draft: draftResponse.ok ? (await draftResponse.json()) as DraftState : null,
   };
 }
