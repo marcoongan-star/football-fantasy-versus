@@ -2,7 +2,7 @@
 
 A configurable fantasy-football platform that combines transparent real-performance scoring with a separate, reproducible career simulation.
 
-> Status: the public recruiter demo, league and draft foundations, and replayable Career Mode match engine are working and tested.
+> Status: the public recruiter preview and persistent local league onboarding are working and tested. Production sign-in and API deployment remain before the private beta is public.
 
 ## Why FFV exists
 
@@ -92,6 +92,7 @@ docs/       Product decisions, data flows, and milestone explanations
 - Formation-aware Career Mode simulation with tactics, fatigue, expected goals, home advantage, and seeded replay.
 - Interactive public Career head-to-head preview with formation and mentality controls.
 - Server-authoritative private draft workspace with snake-order reversal, a 45-second presentation clock, accepted-pick cursor, and reconnect-safe state replacement.
+- Persistent create/join/switch league onboarding through the typed API, including reusable commissioner invites and a valid pre-draft state.
 - Immutable official Career match snapshots that preserve lineups, ratings, fatigue, model version, seed, xG, and result.
 - Separate Career standings with 3/1/0 points, goal difference, goals scored, and head-to-head tiebreaking.
 - Reproducible Career table snapshots as of any completed gameweek.
@@ -136,9 +137,11 @@ pnpm dev
 
 Then open `http://localhost:3000` for the recruiter story, `http://localhost:3000/app` for the career workspace, or `http://localhost:3000/app/draft` for the direct draft-room view. API documentation is at `http://localhost:8000/docs`.
 
+To use real persistent leagues rather than the seeded preview, copy `frontend/.env.example` to `frontend/.env.local` before starting the frontend. The example points to the local FastAPI service and uses development-only identity headers. Open `/app`, create a league, and share its returned invite. Production mode refuses those headers.
+
 Run checks with `pytest` inside `backend`, then `pnpm lint`, `pnpm build`, and the Node tests inside `frontend`.
 
-See [Milestone 2](docs/milestone-2.md) for leagues and membership, [Milestone 3](docs/milestone-3.md) for the snake-draft state machine, [Milestone 4](docs/milestone-4.md) for its public interactive preview, [Milestone 5](docs/milestone-5.md) for Career Mode simulation, [Milestone 6](docs/milestone-6.md) for the public head-to-head slice, [Milestone 7](docs/milestone-7.md) for immutable league history, [Milestone 8](docs/milestone-8.md) for derived standings and corrections, [Milestone 9](docs/milestone-9.md) for the reconnectable private draft workspace, [Milestone 10](docs/milestone-10.md) for natural-key retry safety, [Milestone 11](docs/milestone-11.md) for durable client command identity, and [Milestone 12](docs/milestone-12.md) for private FAAB bidding and deterministic awards.
+See [Milestone 2](docs/milestone-2.md) for leagues and membership, [Milestone 3](docs/milestone-3.md) for the snake-draft state machine, [Milestone 4](docs/milestone-4.md) for its public interactive preview, [Milestone 5](docs/milestone-5.md) for Career Mode simulation, [Milestone 6](docs/milestone-6.md) for the public head-to-head slice, [Milestone 7](docs/milestone-7.md) for immutable league history, [Milestone 8](docs/milestone-8.md) for derived standings and corrections, [Milestone 9](docs/milestone-9.md) for the reconnectable private draft workspace, [Milestone 10](docs/milestone-10.md) for natural-key retry safety, [Milestone 11](docs/milestone-11.md) for durable client command identity, [Milestone 12](docs/milestone-12.md) for private FAAB bidding and deterministic awards, and [Milestone 13](docs/milestone-13.md) for the first persistent league onboarding flow.
 
 ## Core invariants
 
@@ -173,9 +176,9 @@ Free-tier limits are treated as system constraints: the demo will retain provena
 5. Version scoring rules and calculate Wirtz Ratings.
 6. Add commissioner-reviewed trades and expiration.
 7. Simulate Career Mode fixtures with tactics and fatigue.
-8. Stream draft and fixture updates with reconnect fallback.
-9. Test concurrency, scoring, and simulation invariants.
-10. Deploy a free public demonstration.
+8. Connect verified production sign-in and hosted PostgreSQL.
+9. Wire draft picks, FAAB bids, and commissioner controls to authenticated browser commands.
+10. Stream draft and fixture updates with reconnect fallback and deploy the private beta.
 11. Publish architecture decisions and interview preparation.
 
 Every milestone must be working, tested, understood, and pushed separately. Commits will not be backdated.
