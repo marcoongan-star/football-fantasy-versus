@@ -27,12 +27,18 @@ export type CareerMatch = {
 
 export type LeagueWorkspace = {
   source: "api" | "seeded-demo";
+  viewer: Viewer;
   league: LeagueRecord;
   leagueName: string;
   updatedLabel: string;
   standings: CareerStanding[];
   matches: CareerMatch[];
   draft: DraftState | null;
+};
+
+export type Viewer = {
+  id: string;
+  display_name: string;
 };
 
 export type LeagueMember = {
@@ -98,6 +104,7 @@ const seededDraft: DraftState = {
 
 const seededWorkspace: LeagueWorkspace = {
   source: "seeded-demo",
+  viewer: { id: "marco", display_name: "Marco" },
   league: {
     id: "seeded-league",
     name: "The Gegenpress Society",
@@ -185,6 +192,22 @@ export function startDraft(leagueId: string): Promise<DraftState> {
   return apiRequest<DraftState>(`/v1/leagues/${leagueId}/draft/start`, { method: "POST" });
 }
 
+export function submitDraftPick(
+  leagueId: string,
+  playerName: string,
+  playerId: string,
+  commandId: string,
+): Promise<DraftState> {
+  return apiRequest<DraftState>(`/v1/leagues/${leagueId}/draft/picks`, {
+    method: "POST",
+    body: JSON.stringify({
+      client_command_id: commandId,
+      player_id: playerId,
+      player_name: playerName,
+    }),
+  });
+}
+
 export async function loadLeagueWorkspace(
   leagueId: string,
   gameweek: number | null,
@@ -197,13 +220,14 @@ export async function loadLeagueWorkspace(
     ? `/v1/leagues/${leagueId}/career/standings/as-of/${gameweek}`
     : `/v1/leagues/${leagueId}/career/standings`;
   const headers = developmentIdentityHeaders();
-  const [leagueResponse, standingResponse, matchResponse, draftResponse] = await Promise.all([
+  const [viewerResponse, leagueResponse, standingResponse, matchResponse, draftResponse] = await Promise.all([
+    fetch(`${baseUrl}/v1/me`, { headers, signal }),
     fetch(`${baseUrl}/v1/leagues/${leagueId}`, { headers, signal }),
     fetch(`${baseUrl}${standingPath}`, { headers, signal }),
     fetch(`${baseUrl}/v1/leagues/${leagueId}/career/matches`, { headers, signal }),
     fetch(`${baseUrl}/v1/leagues/${leagueId}/draft`, { headers, signal }),
   ]);
-  if (![leagueResponse, standingResponse, matchResponse].every((response) => response.ok)) {
+  if (![viewerResponse, leagueResponse, standingResponse, matchResponse].every((response) => response.ok)) {
     throw new Error("The league API did not return a complete workspace.");
   }
   if (!draftResponse.ok && draftResponse.status !== 404) {
@@ -212,6 +236,7 @@ export async function loadLeagueWorkspace(
   const league = (await leagueResponse.json()) as LeagueRecord;
   return {
     source: "api",
+    viewer: (await viewerResponse.json()) as Viewer,
     league,
     leagueName: league.name,
     updatedLabel: gameweek ? `Official table after GW ${gameweek}` : "Current official table",

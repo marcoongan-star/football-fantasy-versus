@@ -10,6 +10,7 @@ import {
   listMyLeagues,
   loadLeagueWorkspace,
   startDraft,
+  submitDraftPick,
   type DraftState,
   type LeagueCreated,
   type LeagueRecord,
@@ -163,7 +164,7 @@ export function FfvApp({ initialView = "career" }: { initialView?: "league" | "d
         )}
 
         {hasSelectedLeague && view === "league" && <>{apiConfigured && <LeagueAccessPanel onAccepted={acceptLeague} error={accessError} newInvite={newInvite} />}<FaabWorkspace /></>}
-        {hasSelectedLeague && view === "draft" && <DraftWorkspace key={`${workspace.source}-${workspace.draft?.current_pick ?? "pending"}`} draft={workspace.draft} connection={connection} leagueId={workspace.league.id} managerNames={displayNames} onStarted={(draft) => setWorkspace((current) => ({ ...current, draft }))} />}
+        {hasSelectedLeague && view === "draft" && <DraftWorkspace key={`${workspace.source}-${workspace.draft?.current_pick ?? "pending"}`} draft={workspace.draft} connection={connection} leagueId={workspace.league.id} viewer={workspace.viewer} managerNames={displayNames} onDraftUpdated={(draft) => setWorkspace((current) => ({ ...current, draft }))} />}
       </section>
     </main>
   );
@@ -202,9 +203,12 @@ function LeagueAccessPanel({ onAccepted, error, newInvite = "" }: { onAccepted: 
   </article>;
 }
 
-function DraftWorkspace({ draft, connection, leagueId, managerNames: names, onStarted }: { draft: LeagueWorkspace["draft"]; connection: Connection; leagueId: string; managerNames: Record<string, string>; onStarted: (draft: DraftState) => void }) {
-  const [startError, setStartError] = useState("");
+function DraftWorkspace({ draft, connection, leagueId, viewer, managerNames: names, onDraftUpdated }: { draft: LeagueWorkspace["draft"]; connection: Connection; leagueId: string; viewer: LeagueWorkspace["viewer"]; managerNames: Record<string, string>; onDraftUpdated: (draft: DraftState) => void }) {
+  const [actionError, setActionError] = useState("");
   const [starting, setStarting] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [playerName, setPlayerName] = useState("");
+  const [pendingCommandId, setPendingCommandId] = useState("");
   const [seconds, setSeconds] = useState(32);
   const [syncedPick, setSyncedPick] = useState((draft?.current_pick ?? 1) - 1);
 
@@ -214,9 +218,30 @@ function DraftWorkspace({ draft, connection, leagueId, managerNames: names, onSt
     return () => window.clearTimeout(timer);
   }, [seconds]);
 
-  if (!draft) return <article className="workspace-panel empty-draft-panel"><small>DRAFT NOT STARTED</small><h2>Your league is ready for members</h2><p>Share the commissioner invite, wait for at least two active managers, then start the server-authoritative 15-round snake draft.</p><button disabled={starting || connection !== "api"} onClick={() => { setStarting(true); setStartError(""); void startDraft(leagueId).then(onStarted).catch((error: Error) => setStartError(error.message)).finally(() => setStarting(false)); }}>{starting ? "Starting…" : "Start league draft →"}</button>{startError && <p className="form-error" role="alert">{startError}</p>}</article>;
+  if (!draft) return <article className="workspace-panel empty-draft-panel"><small>DRAFT NOT STARTED</small><h2>Your league is ready for members</h2><p>Share the commissioner invite, wait for at least two active managers, then start the server-authoritative 15-round snake draft.</p><button disabled={starting || connection !== "api"} onClick={() => { setStarting(true); setActionError(""); void startDraft(leagueId).then(onDraftUpdated).catch((error: Error) => setActionError(error.message)).finally(() => setStarting(false)); }}>{starting ? "Starting…" : "Start league draft →"}</button>{actionError && <p className="form-error" role="alert">{actionError}</p>}</article>;
 
   const currentManager = draft.current_user_id ? names[draft.current_user_id] ?? draft.current_user_id : "Draft complete";
+  const isMyTurn = draft.status === "active" && draft.current_user_id === viewer.id;
+
+  async function makePick() {
+    const normalizedName = playerName.trim();
+    if (!normalizedName || !isMyTurn) return;
+    const commandId = pendingCommandId || crypto.randomUUID();
+    const playerId = `manual:${normalizedName.toLocaleLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+    setPendingCommandId(commandId);
+    setSubmitting(true);
+    setActionError("");
+    try {
+      const nextDraft = await submitDraftPick(leagueId, normalizedName, playerId, commandId);
+      setPendingCommandId("");
+      setPlayerName("");
+      onDraftUpdated(nextDraft);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "FFV could not save that pick.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   return <>
     <div className="draft-command-strip">
@@ -244,11 +269,17 @@ function DraftWorkspace({ draft, connection, leagueId, managerNames: names, onSt
         <div className="panel-title"><div><small>CURRENT TURN</small><h2>{currentManager}</h2></div><span className="locked-pill">Pick {draft.current_pick}</span></div>
         <div className="clock-orbit"><strong>{seconds}</strong><span>seconds</span></div>
         <p>The browser may display the countdown, but only the API accepts a pick, stores its command ID, enforces unique ownership, and advances the cursor once.</p>
+        {connection === "api" && <form className="draft-pick-form" onSubmit={(event) => { event.preventDefault(); void makePick(); }}>
+          <label>PLAYER NAME<input value={playerName} required maxLength={120} placeholder="Florian Wirtz" onChange={(event) => { setPlayerName(event.target.value); setPendingCommandId(""); setActionError(""); }} /></label>
+          <button disabled={!isMyTurn || !playerName.trim() || submitting}>{submitting ? "Saving pick…" : isMyTurn ? "Submit draft pick →" : `Waiting for ${currentManager}`}</button>
+          <small>Manual player entry is a private-beta bridge. The API still prevents duplicate ownership and wrong-turn picks.</small>
+        </form>}
+        {actionError && <p className="form-error" role="alert">{actionError} {pendingCommandId && "Retrying will reuse the same command."}</p>}
         <div className="reconnect-proof"><small>RECONNECT CONTRACT</small><ol><li>Create one command ID before sending</li><li>Reuse that ID for every network retry</li><li>Resume after accepted pick {syncedPick}</li><li>Replace local board, never merge guesses</li></ol></div>
         <button onClick={() => setSyncedPick(draft.current_pick - 1)}>Resync from server →</button>
       </aside>
     </div>
-    <p className="workspace-disclaimer">Seeded recruiter preview unless the authenticated API badge is active. Player selections are demonstrations, not a live draft.</p>
+    <p className="workspace-disclaimer">The seeded recruiter preview is illustrative. With the authenticated API badge active, submitted picks are persistent league commands.</p>
   </>;
 }
 
