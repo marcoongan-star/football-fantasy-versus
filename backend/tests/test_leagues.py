@@ -127,6 +127,18 @@ def test_public_demo_needs_no_login_but_private_routes_do(client: TestClient) ->
     assert client.post("/v1/leagues", json={"name": "Private League"}).status_code == 401
 
 
+def test_viewer_identity_is_stable_and_matches_league_membership(client: TestClient) -> None:
+    headers = auth_headers(0, "Marco")
+    first = client.get("/v1/me", headers=headers)
+    second = client.get("/v1/me", headers=headers)
+    league = client.post("/v1/leagues", json={"name": "Identity XI"}, headers=headers)
+
+    assert first.status_code == second.status_code == 200
+    assert first.json() == second.json()
+    assert first.json()["display_name"] == "Marco"
+    assert league.json()["members"][0]["user_id"] == first.json()["id"]
+
+
 def test_lists_only_the_authenticated_users_active_leagues(client: TestClient) -> None:
     first = client.post(
         "/v1/leagues", json={"name": "Wirtz First XI"}, headers=auth_headers(0, "Marco")

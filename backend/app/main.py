@@ -28,13 +28,15 @@ from .schemas import (
     LeagueCreated,
     LeagueView,
     MemberView,
+    UserView,
 )
 from .services import (
     DomainError,
-    create_league,
     create_faab_window,
+    create_league,
     draft_seat_order,
     expected_drafter,
+    get_or_create_user,
     join_league,
     list_active_leagues,
     process_faab_window,
@@ -160,6 +162,15 @@ def create_app(
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/v1/me", response_model=UserView)
+    def get_viewer(
+        principal: Principal = Depends(current_principal),
+        session: Session = Depends(session_dependency),
+    ) -> UserView:
+        with session.begin():
+            user = get_or_create_user(session, principal)
+        return UserView.model_validate(user)
 
     install_career_routes(app, session_dependency)
 
