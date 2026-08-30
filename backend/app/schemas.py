@@ -103,6 +103,15 @@ class FaabWindowView(BaseModel):
     status: str
 
 
+class FaabWindowStateView(FaabWindowView):
+    my_bid_amount: int | None
+
+
+class FaabBoardView(BaseModel):
+    faab_balance: int
+    windows: list[FaabWindowStateView]
+
+
 class FaabBidCreate(BaseModel):
     client_command_id: str = Field(min_length=8, max_length=100)
     amount: int = Field(ge=0, le=100)

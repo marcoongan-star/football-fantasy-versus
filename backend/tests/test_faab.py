@@ -154,3 +154,41 @@ def test_equal_amount_is_accepted_without_revealing_another_bid(client: TestClie
     }
     with client.app.state.database.session_factory() as session:
         assert len(list(session.scalars(select(FaabBid)))) == 2
+
+
+def test_faab_board_returns_only_the_authenticated_managers_bid(client: TestClient) -> None:
+    league = create_league(client)
+    client.post(
+        "/v1/leagues/join",
+        json={"invite_code": league["invite_code"]},
+        headers=auth_headers(1),
+    )
+    window = client.post(
+        f"/v1/leagues/{league['id']}/faab/windows",
+        json={"player_id": "manual:wirtz", "player_name": "Florian Wirtz"},
+        headers=auth_headers(0, "Marco"),
+    ).json()
+    client.post(
+        f"/v1/leagues/{league['id']}/faab/windows/{window['id']}/bids",
+        json={"client_command_id": "marco-browser-bid", "amount": 31},
+        headers=auth_headers(0, "Marco"),
+    )
+    client.post(
+        f"/v1/leagues/{league['id']}/faab/windows/{window['id']}/bids",
+        json={"client_command_id": "manager-browser-bid", "amount": 44},
+        headers=auth_headers(1),
+    )
+
+    marco_board = client.get(
+        f"/v1/leagues/{league['id']}/faab", headers=auth_headers(0, "Marco")
+    )
+    manager_board = client.get(
+        f"/v1/leagues/{league['id']}/faab", headers=auth_headers(1)
+    )
+
+    assert marco_board.status_code == manager_board.status_code == 200
+    assert marco_board.json()["faab_balance"] == manager_board.json()["faab_balance"] == 100
+    assert marco_board.json()["windows"][0]["my_bid_amount"] == 31
+    assert manager_board.json()["windows"][0]["my_bid_amount"] == 44
+    assert "44" not in str(marco_board.json())
+    assert "31" not in str(manager_board.json())

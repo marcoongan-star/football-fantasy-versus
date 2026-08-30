@@ -11,17 +11,19 @@ from sqlalchemy.orm import Session, selectinload
 from .auth import Principal, current_principal
 from .career_api import install_career_routes
 from .database import Database
-from .models import AuditEvent, DraftPick, DraftSession, FaabWindow, League, LeagueMember
+from .models import AuditEvent, DraftPick, DraftSession, FaabBid, FaabWindow, League, LeagueMember
 from .schemas import (
     AuditEventView,
     DraftPickCreate,
     DraftPickView,
     DraftStateView,
     FaabAwardView,
+    FaabBoardView,
     FaabBidCreate,
     FaabBidReceipt,
     FaabWindowCreate,
     FaabWindowView,
+    FaabWindowStateView,
     InviteRotated,
     JoinLeague,
     LeagueCreate,
@@ -112,6 +114,44 @@ def _league_view(session: Session, league_id: str) -> LeagueView:
                 removed_at=member.removed_at,
             )
             for member in members
+        ],
+    )
+
+
+def _faab_board_view(
+    session: Session,
+    league_id: str,
+    membership: LeagueMember,
+) -> FaabBoardView:
+    windows = list(
+        session.scalars(
+            select(FaabWindow)
+            .where(FaabWindow.league_id == league_id, FaabWindow.status == "open")
+            .order_by(FaabWindow.process_at, FaabWindow.player_name)
+        )
+    )
+    bids = {
+        bid.window_id: bid.amount
+        for bid in session.scalars(
+            select(FaabBid).where(
+                FaabBid.league_id == league_id,
+                FaabBid.user_id == membership.user_id,
+            )
+        )
+    }
+    return FaabBoardView(
+        faab_balance=membership.faab_balance,
+        windows=[
+            FaabWindowStateView(
+                id=window.id,
+                league_id=window.league_id,
+                player_id=window.player_id,
+                player_name=window.player_name,
+                process_at=window.process_at,
+                status=window.status,
+                my_bid_amount=bids.get(window.id),
+            )
+            for window in windows
         ],
     )
 
@@ -334,6 +374,15 @@ def create_app(
                 player_id=payload.player_id,
                 player_name=payload.player_name,
             )
+
+    @app.get("/v1/leagues/{league_id}/faab", response_model=FaabBoardView)
+    def get_faab_board_endpoint(
+        league_id: str,
+        principal: Principal = Depends(current_principal),
+        session: Session = Depends(session_dependency),
+    ) -> FaabBoardView:
+        membership = require_active_member(session, league_id, principal)
+        return _faab_board_view(session, league_id, membership)
 
     @app.post(
         "/v1/leagues/{league_id}/faab/windows/{window_id}/bids",
