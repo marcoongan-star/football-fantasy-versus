@@ -34,6 +34,7 @@ export type LeagueWorkspace = {
   standings: CareerStanding[];
   matches: CareerMatch[];
   draft: DraftState | null;
+  faab: FaabBoard;
 };
 
 export type Viewer = {
@@ -79,6 +80,21 @@ export type DraftState = {
   current_user_id: string | null;
   seat_order: string[];
   picks: DraftPick[];
+};
+
+export type FaabWindowRecord = {
+  id: string;
+  league_id: string;
+  player_id: string;
+  player_name: string;
+  process_at: string;
+  status: "open";
+  my_bid_amount: number | null;
+};
+
+export type FaabBoard = {
+  faab_balance: number;
+  windows: FaabWindowRecord[];
 };
 
 const seededDraft: DraftState = {
@@ -129,6 +145,7 @@ const seededWorkspace: LeagueWorkspace = {
     { id: "gw7-a", gameweek: 7, home_team_id: "False Nine FC", away_team_id: "Expected Goals", home_goals: 3, away_goals: 2, home_expected_goals: 2.08, away_expected_goals: 1.55, model_version: "career-v0.1", seed: 806171, status: "active" },
   ],
   draft: seededDraft,
+  faab: { faab_balance: 100, windows: [] },
 };
 
 export function demoWorkspace(): LeagueWorkspace {
@@ -208,6 +225,30 @@ export function submitDraftPick(
   });
 }
 
+export function loadFaabBoard(leagueId: string, signal?: AbortSignal): Promise<FaabBoard> {
+  return apiRequest<FaabBoard>(`/v1/leagues/${leagueId}/faab`, { signal });
+}
+
+export function openFaabWindow(leagueId: string, playerName: string): Promise<Omit<FaabWindowRecord, "my_bid_amount">> {
+  const playerId = `manual:${playerName.toLocaleLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+  return apiRequest<Omit<FaabWindowRecord, "my_bid_amount">>(`/v1/leagues/${leagueId}/faab/windows`, {
+    method: "POST",
+    body: JSON.stringify({ player_id: playerId, player_name: playerName.trim() }),
+  });
+}
+
+export function saveFaabBid(
+  leagueId: string,
+  windowId: string,
+  amount: number,
+  commandId: string,
+): Promise<{ window_id: string; amount: number; faab_balance: number; status: "saved" }> {
+  return apiRequest<{ window_id: string; amount: number; faab_balance: number; status: "saved" }>(`/v1/leagues/${leagueId}/faab/windows/${windowId}/bids`, {
+    method: "POST",
+    body: JSON.stringify({ client_command_id: commandId, amount }),
+  });
+}
+
 export async function loadLeagueWorkspace(
   leagueId: string,
   gameweek: number | null,
@@ -220,14 +261,15 @@ export async function loadLeagueWorkspace(
     ? `/v1/leagues/${leagueId}/career/standings/as-of/${gameweek}`
     : `/v1/leagues/${leagueId}/career/standings`;
   const headers = developmentIdentityHeaders();
-  const [viewerResponse, leagueResponse, standingResponse, matchResponse, draftResponse] = await Promise.all([
+  const [viewerResponse, leagueResponse, standingResponse, matchResponse, draftResponse, faabResponse] = await Promise.all([
     fetch(`${baseUrl}/v1/me`, { headers, signal }),
     fetch(`${baseUrl}/v1/leagues/${leagueId}`, { headers, signal }),
     fetch(`${baseUrl}${standingPath}`, { headers, signal }),
     fetch(`${baseUrl}/v1/leagues/${leagueId}/career/matches`, { headers, signal }),
     fetch(`${baseUrl}/v1/leagues/${leagueId}/draft`, { headers, signal }),
+    fetch(`${baseUrl}/v1/leagues/${leagueId}/faab`, { headers, signal }),
   ]);
-  if (![viewerResponse, leagueResponse, standingResponse, matchResponse].every((response) => response.ok)) {
+  if (![viewerResponse, leagueResponse, standingResponse, matchResponse, faabResponse].every((response) => response.ok)) {
     throw new Error("The league API did not return a complete workspace.");
   }
   if (!draftResponse.ok && draftResponse.status !== 404) {
@@ -243,5 +285,6 @@ export async function loadLeagueWorkspace(
     standings: (await standingResponse.json()) as CareerStanding[],
     matches: (await matchResponse.json()) as CareerMatch[],
     draft: draftResponse.ok ? (await draftResponse.json()) as DraftState : null,
+    faab: (await faabResponse.json()) as FaabBoard,
   };
 }

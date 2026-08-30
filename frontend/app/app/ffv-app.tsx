@@ -8,10 +8,15 @@ import {
   isApiConfigured,
   joinLeague,
   listMyLeagues,
+  loadFaabBoard,
   loadLeagueWorkspace,
+  openFaabWindow,
+  saveFaabBid,
   startDraft,
   submitDraftPick,
   type DraftState,
+  type FaabBoard,
+  type FaabWindowRecord,
   type LeagueCreated,
   type LeagueRecord,
   type LeagueWorkspace,
@@ -163,7 +168,7 @@ export function FfvApp({ initialView = "career" }: { initialView?: "league" | "d
           </>
         )}
 
-        {hasSelectedLeague && view === "league" && <>{apiConfigured && <LeagueAccessPanel onAccepted={acceptLeague} error={accessError} newInvite={newInvite} />}<FaabWorkspace /></>}
+        {hasSelectedLeague && view === "league" && <>{apiConfigured && <LeagueAccessPanel onAccepted={acceptLeague} error={accessError} newInvite={newInvite} />}<FaabWorkspace connection={connection} league={workspace.league} viewer={workspace.viewer} board={workspace.faab} onBoardUpdated={(faab) => setWorkspace((current) => ({ ...current, faab }))} /></>}
         {hasSelectedLeague && view === "draft" && <DraftWorkspace key={`${workspace.source}-${workspace.draft?.current_pick ?? "pending"}`} draft={workspace.draft} connection={connection} leagueId={workspace.league.id} viewer={workspace.viewer} managerNames={displayNames} onDraftUpdated={(draft) => setWorkspace((current) => ({ ...current, draft }))} />}
       </section>
     </main>
@@ -283,7 +288,77 @@ function DraftWorkspace({ draft, connection, leagueId, viewer, managerNames: nam
   </>;
 }
 
-function FaabWorkspace() {
+function FaabWorkspace({ connection, league, viewer, board, onBoardUpdated }: { connection: Connection; league: LeagueRecord; viewer: LeagueWorkspace["viewer"]; board: FaabBoard; onBoardUpdated: (board: FaabBoard) => void }) {
+  const [playerName, setPlayerName] = useState("");
+  const [opening, setOpening] = useState(false);
+  const [error, setError] = useState("");
+  const isCommissioner = league.commissioner_user_id === viewer.id;
+
+  async function refresh() {
+    onBoardUpdated(await loadFaabBoard(league.id));
+  }
+
+  async function openWindow() {
+    setOpening(true);
+    setError("");
+    try {
+      await openFaabWindow(league.id, playerName);
+      setPlayerName("");
+      await refresh();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "FFV could not open that claim.");
+    } finally {
+      setOpening(false);
+    }
+  }
+
+  if (connection !== "api") return <SeededFaabWorkspace />;
+  const nextWindow = board.windows[0];
+  return <>
+    <div className="faab-summary">
+      <article><small>YOUR BALANCE</small><strong>{board.faab_balance}</strong><span>FAAB available</span></article>
+      <article><small>OPEN CLAIMS</small><strong>{String(board.windows.length).padStart(2, "0")}</strong><span>your bids stay private</span></article>
+      <article><small>NEXT PROCESSING</small><strong>{nextWindow ? formatFaabDeadline(nextWindow.process_at) : "—"}</strong><span>America/New_York</span></article>
+    </div>
+    {isCommissioner && <article className="workspace-panel faab-open-panel"><div className="panel-title"><div><small>COMMISSIONER COMMAND</small><h2>Open a blind claim</h2></div><span>Processes at 5 PM New York</span></div><form className="faab-open-form" onSubmit={(event) => { event.preventDefault(); void openWindow(); }}><label>AVAILABLE PLAYER<input required maxLength={120} value={playerName} placeholder="Player name" onChange={(event) => setPlayerName(event.target.value)} /></label><button disabled={opening || !playerName.trim()}>{opening ? "Opening…" : "Open claim →"}</button></form>{error && <p className="form-error" role="alert">{error}</p>}</article>}
+    <div className="faab-window-list">
+      {board.windows.length === 0 ? <article className="workspace-panel faab-empty"><small>NO OPEN CLAIMS</small><h2>The waiver board is clear.</h2><p>The commissioner can open a blind claim for an available player. Every accepted bid stays private until processing.</p></article> : board.windows.map((window) => <FaabBidCard key={window.id} window={window} leagueId={league.id} balance={board.faab_balance} onSaved={refresh} />)}
+    </div>
+    <p className="workspace-disclaimer">Persistent private-league state. The API exposes only your own bid before the 5 PM processing boundary.</p>
+  </>;
+}
+
+function FaabBidCard({ window, leagueId, balance, onSaved }: { window: FaabWindowRecord; leagueId: string; balance: number; onSaved: () => Promise<void> }) {
+  const [bid, setBid] = useState(String(window.my_bid_amount ?? 0));
+  const [pendingCommandId, setPendingCommandId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function save() {
+    const amount = Number(bid);
+    const commandId = pendingCommandId || crypto.randomUUID();
+    setPendingCommandId(commandId);
+    setBusy(true);
+    setError("");
+    try {
+      await saveFaabBid(leagueId, window.id, amount, commandId);
+      setPendingCommandId("");
+      await onSaved();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "FFV could not save that bid.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <article className="workspace-panel faab-live-card"><div className="panel-title"><div><small>OPEN BLIND CLAIM</small><h2>{window.player_name}</h2></div><span className="locked-pill">{formatFaabDeadline(window.process_at)}</span></div><form onSubmit={(event) => { event.preventDefault(); void save(); }}><label>YOUR PRIVATE BID<div><input aria-label={`Private FAAB bid for ${window.player_name}`} type="number" min="0" max={balance} value={bid} onChange={(event) => { setBid(event.target.value); setPendingCommandId(""); setError(""); }} /><span>FAAB</span></div></label><button disabled={busy || !Number.isInteger(Number(bid)) || Number(bid) < 0 || Number(bid) > balance}>{busy ? "Saving…" : window.my_bid_amount === null ? "Save blind bid →" : "Update blind bid →"}</button></form><p>{window.my_bid_amount === null ? "No bid saved yet." : `Your saved bid is ${window.my_bid_amount} FAAB. Other amounts remain hidden.`}</p>{error && <p className="form-error" role="alert">{error} {pendingCommandId && "Retrying will reuse the same command."}</p>}</article>;
+}
+
+function formatFaabDeadline(value: string): string {
+  return new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" }).format(new Date(value));
+}
+
+function SeededFaabWorkspace() {
   const [bid, setBid] = useState("24");
   const [saved, setSaved] = useState(false);
   return <>
