@@ -188,7 +188,16 @@ def test_faab_board_returns_only_the_authenticated_managers_bid(client: TestClie
 
     assert marco_board.status_code == manager_board.status_code == 200
     assert marco_board.json()["faab_balance"] == manager_board.json()["faab_balance"] == 100
-    assert marco_board.json()["windows"][0]["my_bid_amount"] == 31
-    assert manager_board.json()["windows"][0]["my_bid_amount"] == 44
-    assert "44" not in str(marco_board.json())
-    assert "31" not in str(manager_board.json())
+    marco_window = marco_board.json()["windows"][0]
+    manager_window = manager_board.json()["windows"][0]
+    assert set(marco_window) == set(manager_window) == {
+        "id",
+        "league_id",
+        "player_id",
+        "player_name",
+        "process_at",
+        "status",
+        "my_bid_amount",
+    }
+    assert marco_window["my_bid_amount"] == 31
+    assert manager_window["my_bid_amount"] == 44
