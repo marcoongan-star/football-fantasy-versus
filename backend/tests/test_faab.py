@@ -1,11 +1,11 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.auth import Principal
-from app.models import FaabBid, LeagueMember, User
+from app.models import FaabAward, FaabBid, FaabWindow, LeagueMember, User
 from app.services import (
     create_faab_window,
     next_faab_process_at,
@@ -201,3 +201,56 @@ def test_faab_board_returns_only_the_authenticated_managers_bid(client: TestClie
     }
     assert marco_window["my_bid_amount"] == 31
     assert manager_window["my_bid_amount"] == 44
+
+
+def test_commissioner_processes_all_due_windows_once(client: TestClient) -> None:
+    league = create_league(client)
+    client.post(
+        "/v1/leagues/join",
+        json={"invite_code": league["invite_code"]},
+        headers=auth_headers(1),
+    )
+    windows = [
+        client.post(
+            f"/v1/leagues/{league['id']}/faab/windows",
+            json={"player_id": f"due-{number}", "player_name": f"Due Player {number}"},
+            headers=auth_headers(0, "Marco"),
+        ).json()
+        for number in (1, 2)
+    ]
+    client.post(
+        f"/v1/leagues/{league['id']}/faab/windows/{windows[0]['id']}/bids",
+        json={"client_command_id": "due-window-winning-bid", "amount": 19},
+        headers=auth_headers(1),
+    )
+    with client.app.state.database.session_factory() as session:
+        with session.begin():
+            for window in session.scalars(
+                select(FaabWindow).where(FaabWindow.league_id == league["id"])
+            ):
+                window.process_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+
+    denied = client.post(
+        f"/v1/leagues/{league['id']}/faab/process-due",
+        headers=auth_headers(1),
+    )
+    processed = client.post(
+        f"/v1/leagues/{league['id']}/faab/process-due",
+        headers=auth_headers(0, "Marco"),
+    )
+    repeated = client.post(
+        f"/v1/leagues/{league['id']}/faab/process-due",
+        headers=auth_headers(0, "Marco"),
+    )
+
+    assert denied.status_code == 403
+    assert processed.status_code == 200
+    assert processed.json()["processed_count"] == 2
+    assert processed.json()["awarded_count"] == 1
+    assert processed.json()["unclaimed_count"] == 1
+    assert repeated.json()["processed_count"] == 0
+    assert client.get(
+        f"/v1/leagues/{league['id']}/faab", headers=auth_headers(0, "Marco")
+    ).json()["windows"] == []
+    with client.app.state.database.session_factory() as session:
+        assert len(list(session.scalars(select(FaabAward)))) == 1

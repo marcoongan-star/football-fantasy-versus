@@ -133,6 +133,13 @@ class FaabAwardView(BaseModel):
     processed_at: datetime
 
 
+class FaabProcessSummary(BaseModel):
+    processed_count: int
+    awarded_count: int
+    unclaimed_count: int
+    awards: list[FaabAwardView]
+
+
 class CareerPlayerInput(BaseModel):
     player_id: str = Field(min_length=1, max_length=80)
     position: Position

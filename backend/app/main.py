@@ -24,6 +24,7 @@ from .schemas import (
     FaabWindowCreate,
     FaabWindowView,
     FaabWindowStateView,
+    FaabProcessSummary,
     InviteRotated,
     JoinLeague,
     LeagueCreate,
@@ -42,6 +43,7 @@ from .services import (
     join_league,
     list_active_leagues,
     process_faab_window,
+    process_due_faab_windows,
     remove_member,
     require_active_member,
     restore_member,
@@ -434,6 +436,37 @@ def create_app(
             player_id=window.player_id,
             player_name=window.player_name,
             processed_at=window.processed_at,
+        )
+
+    @app.post(
+        "/v1/leagues/{league_id}/faab/process-due",
+        response_model=FaabProcessSummary,
+    )
+    def process_due_faab_windows_endpoint(
+        league_id: str,
+        principal: Principal = Depends(current_principal),
+        session: Session = Depends(session_dependency),
+    ) -> FaabProcessSummary:
+        with session.begin():
+            results = process_due_faab_windows(session, league_id, principal)
+        awards = [
+            FaabAwardView(
+                window_id=window.id,
+                winner_user_id=award.winner_user_id if award else None,
+                amount=award.amount if award else None,
+                player_id=window.player_id,
+                player_name=window.player_name,
+                processed_at=window.processed_at,
+            )
+            for window, award in results
+            if window.processed_at is not None
+        ]
+        awarded_count = sum(item.winner_user_id is not None for item in awards)
+        return FaabProcessSummary(
+            processed_count=len(awards),
+            awarded_count=awarded_count,
+            unclaimed_count=len(awards) - awarded_count,
+            awards=awards,
         )
 
     return app

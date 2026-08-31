@@ -699,3 +699,34 @@ def process_faab_window(
     window.processed_at = processed_at
     session.flush()
     return window, award
+
+
+def process_due_faab_windows(
+    session: Session,
+    league_id: str,
+    principal: Principal,
+    *,
+    now: datetime | None = None,
+) -> list[tuple[FaabWindow, FaabAward | None]]:
+    """Resolve every due open window in a stable order through the same award path."""
+    require_commissioner(session, league_id, principal)
+    processed_at = now or utc_now()
+    candidate_ids = [
+        window.id
+        for window in session.scalars(
+            select(FaabWindow)
+            .where(FaabWindow.league_id == league_id, FaabWindow.status == "open")
+            .order_by(FaabWindow.process_at, FaabWindow.id)
+        )
+        if _aware_utc(window.process_at) <= _aware_utc(processed_at)
+    ]
+    return [
+        process_faab_window(
+            session,
+            league_id,
+            window_id,
+            principal,
+            now=processed_at,
+        )
+        for window_id in candidate_ids
+    ]
