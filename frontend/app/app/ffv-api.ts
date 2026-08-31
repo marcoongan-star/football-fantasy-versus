@@ -97,6 +97,20 @@ export type FaabBoard = {
   windows: FaabWindowRecord[];
 };
 
+export type FaabProcessSummary = {
+  processed_count: number;
+  awarded_count: number;
+  unclaimed_count: number;
+  awards: Array<{
+    window_id: string;
+    winner_user_id: string | null;
+    amount: number | null;
+    player_id: string;
+    player_name: string;
+    processed_at: string;
+  }>;
+};
+
 const seededDraft: DraftState = {
   status: "active",
   current_pick: 16,
@@ -246,6 +260,12 @@ export function saveFaabBid(
   return apiRequest<{ window_id: string; amount: number; faab_balance: number; status: "saved" }>(`/v1/leagues/${leagueId}/faab/windows/${windowId}/bids`, {
     method: "POST",
     body: JSON.stringify({ client_command_id: commandId, amount }),
+  });
+}
+
+export function processDueFaabWindows(leagueId: string): Promise<FaabProcessSummary> {
+  return apiRequest<FaabProcessSummary>(`/v1/leagues/${leagueId}/faab/process-due`, {
+    method: "POST",
   });
 }
 

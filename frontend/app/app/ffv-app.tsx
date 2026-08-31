@@ -11,6 +11,7 @@ import {
   loadFaabBoard,
   loadLeagueWorkspace,
   openFaabWindow,
+  processDueFaabWindows,
   saveFaabBid,
   startDraft,
   submitDraftPick,
@@ -291,7 +292,9 @@ function DraftWorkspace({ draft, connection, leagueId, viewer, managerNames: nam
 function FaabWorkspace({ connection, league, viewer, board, onBoardUpdated }: { connection: Connection; league: LeagueRecord; viewer: LeagueWorkspace["viewer"]; board: FaabBoard; onBoardUpdated: (board: FaabBoard) => void }) {
   const [playerName, setPlayerName] = useState("");
   const [opening, setOpening] = useState(false);
+  const [processing, setProcessing] = useState(false);
   const [error, setError] = useState("");
+  const [processMessage, setProcessMessage] = useState("");
   const isCommissioner = league.commissioner_user_id === viewer.id;
 
   async function refresh() {
@@ -312,6 +315,25 @@ function FaabWorkspace({ connection, league, viewer, board, onBoardUpdated }: { 
     }
   }
 
+  async function processDue() {
+    setProcessing(true);
+    setError("");
+    setProcessMessage("");
+    try {
+      const result = await processDueFaabWindows(league.id);
+      setProcessMessage(
+        result.processed_count === 0
+          ? "No claim windows have reached the 5 PM boundary yet."
+          : `${result.awarded_count} awarded · ${result.unclaimed_count} closed without an eligible bid.`,
+      );
+      await refresh();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "FFV could not process due claims.");
+    } finally {
+      setProcessing(false);
+    }
+  }
+
   if (connection !== "api") return <SeededFaabWorkspace />;
   const nextWindow = board.windows[0];
   return <>
@@ -320,7 +342,7 @@ function FaabWorkspace({ connection, league, viewer, board, onBoardUpdated }: { 
       <article><small>OPEN CLAIMS</small><strong>{String(board.windows.length).padStart(2, "0")}</strong><span>your bids stay private</span></article>
       <article><small>NEXT PROCESSING</small><strong>{nextWindow ? formatFaabDeadline(nextWindow.process_at) : "—"}</strong><span>America/New_York</span></article>
     </div>
-    {isCommissioner && <article className="workspace-panel faab-open-panel"><div className="panel-title"><div><small>COMMISSIONER COMMAND</small><h2>Open a blind claim</h2></div><span>Processes at 5 PM New York</span></div><form className="faab-open-form" onSubmit={(event) => { event.preventDefault(); void openWindow(); }}><label>AVAILABLE PLAYER<input required maxLength={120} value={playerName} placeholder="Player name" onChange={(event) => setPlayerName(event.target.value)} /></label><button disabled={opening || !playerName.trim()}>{opening ? "Opening…" : "Open claim →"}</button></form>{error && <p className="form-error" role="alert">{error}</p>}</article>}
+    {isCommissioner && <article className="workspace-panel faab-open-panel"><div className="panel-title"><div><small>COMMISSIONER COMMAND</small><h2>Open or resolve claims</h2></div><span>Processes at 5 PM New York</span></div><form className="faab-open-form" onSubmit={(event) => { event.preventDefault(); void openWindow(); }}><label>AVAILABLE PLAYER<input required maxLength={120} value={playerName} placeholder="Player name" onChange={(event) => setPlayerName(event.target.value)} /></label><button disabled={opening || !playerName.trim()}>{opening ? "Opening…" : "Open claim →"}</button></form><div className="faab-process-row"><p>The server resolves every due claim in deadline order and ignores early windows.</p><button type="button" disabled={processing} onClick={() => void processDue()}>{processing ? "Processing…" : "Process due claims →"}</button></div>{processMessage && <p className="faab-process-message" role="status">{processMessage}</p>}{error && <p className="form-error" role="alert">{error}</p>}</article>}
     <div className="faab-window-list">
       {board.windows.length === 0 ? <article className="workspace-panel faab-empty"><small>NO OPEN CLAIMS</small><h2>The waiver board is clear.</h2><p>The commissioner can open a blind claim for an available player. Every accepted bid stays private until processing.</p></article> : board.windows.map((window) => <FaabBidCard key={window.id} window={window} leagueId={league.id} balance={board.faab_balance} onSaved={refresh} />)}
     </div>
