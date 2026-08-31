@@ -21,6 +21,8 @@ from .models import (
     League,
     LeagueMember,
     User,
+    TradeAsset,
+    TradeProposal,
     utc_now,
 )
 
@@ -454,6 +456,162 @@ def submit_draft_pick(
         draft.status = "complete"
     session.flush()
     return draft
+
+
+def current_roster(session: Session, league_id: str) -> dict[str, tuple[str, str]]:
+    """Rebuild player ownership from draft facts and approved trade events."""
+    ownership = {
+        pick.player_id: (pick.user_id, pick.player_name)
+        for pick in session.scalars(
+            select(DraftPick)
+            .where(DraftPick.league_id == league_id)
+            .order_by(DraftPick.pick_number)
+        )
+    }
+    approved_assets = session.execute(
+        select(TradeAsset, TradeProposal)
+        .join(TradeProposal, TradeProposal.id == TradeAsset.trade_id)
+        .where(
+            TradeAsset.league_id == league_id,
+            TradeProposal.status == "approved",
+        )
+        .order_by(TradeProposal.decided_at, TradeProposal.id, TradeAsset.id)
+    ).all()
+    for asset, _trade in approved_assets:
+        existing = ownership.get(asset.player_id)
+        if existing is not None and existing[0] == asset.from_user_id:
+            ownership[asset.player_id] = (asset.to_user_id, asset.player_name)
+    return ownership
+
+
+def create_trade(
+    session: Session,
+    league_id: str,
+    principal: Principal,
+    *,
+    counterparty_user_id: str,
+    offered_player_ids: list[str],
+    requested_player_ids: list[str],
+    now: datetime | None = None,
+) -> TradeProposal:
+    proposer = require_active_member(session, league_id, principal)
+    counterparty = session.scalar(
+        select(LeagueMember).where(
+            LeagueMember.league_id == league_id,
+            LeagueMember.user_id == counterparty_user_id,
+            LeagueMember.status == "active",
+        )
+    )
+    if counterparty is None or counterparty.user_id == proposer.user_id:
+        raise DomainError("Choose another active manager.", 422, "trade_counterparty_invalid")
+    offered = list(dict.fromkeys(player_id.strip() for player_id in offered_player_ids))
+    requested = list(dict.fromkeys(player_id.strip() for player_id in requested_player_ids))
+    if not offered or not requested or set(offered) & set(requested):
+        raise DomainError("A trade needs distinct players from both managers.", 422, "trade_assets_invalid")
+    roster = current_roster(session, league_id)
+    for player_id in offered:
+        if roster.get(player_id, (None, ""))[0] != proposer.user_id:
+            raise DomainError("You can only offer players you currently own.", 409, "trade_ownership_changed")
+    for player_id in requested:
+        if roster.get(player_id, (None, ""))[0] != counterparty.user_id:
+            raise DomainError("Requested players must belong to the other manager.", 409, "trade_ownership_changed")
+
+    created_at = now or utc_now()
+    trade = TradeProposal(
+        league_id=league_id,
+        proposer_user_id=proposer.user_id,
+        counterparty_user_id=counterparty.user_id,
+        status="proposed",
+        created_at=created_at,
+        expires_at=created_at + timedelta(hours=36),
+    )
+    session.add(trade)
+    session.flush()
+    for player_id in offered:
+        session.add(TradeAsset(
+            trade_id=trade.id, league_id=league_id,
+            from_user_id=proposer.user_id, to_user_id=counterparty.user_id,
+            player_id=player_id, player_name=roster[player_id][1],
+        ))
+    for player_id in requested:
+        session.add(TradeAsset(
+            trade_id=trade.id, league_id=league_id,
+            from_user_id=counterparty.user_id, to_user_id=proposer.user_id,
+            player_id=player_id, player_name=roster[player_id][1],
+        ))
+    session.add(AuditEvent(
+        league_id=league_id, actor_user_id=proposer.user_id,
+        subject_user_id=counterparty.user_id, event_type="trade.proposed",
+        detail=f"Trade {trade.id} proposed with a 36-hour commissioner boundary.",
+    ))
+    session.flush()
+    return trade
+
+
+def _locked_trade(session: Session, league_id: str, trade_id: str) -> TradeProposal:
+    trade = session.scalar(
+        select(TradeProposal).where(
+            TradeProposal.id == trade_id,
+            TradeProposal.league_id == league_id,
+        ).with_for_update()
+    )
+    if trade is None:
+        raise DomainError("Trade not found.", 404, "trade_not_found")
+    return trade
+
+
+def accept_trade(
+    session: Session, league_id: str, trade_id: str, principal: Principal,
+    *, now: datetime | None = None,
+) -> TradeProposal:
+    member = require_active_member(session, league_id, principal)
+    trade = _locked_trade(session, league_id, trade_id)
+    accepted_at = now or utc_now()
+    if trade.counterparty_user_id != member.user_id:
+        raise DomainError("Only the receiving manager can accept this trade.", 403, "trade_recipient_required")
+    if trade.status != "proposed":
+        raise DomainError("This trade is no longer awaiting acceptance.", 409, "trade_state_conflict")
+    if accepted_at >= _aware_utc(trade.expires_at):
+        trade.status = "expired"
+        raise DomainError("The 36-hour trade window expired.", 409, "trade_expired")
+    trade.status = "accepted"
+    trade.responded_at = accepted_at
+    session.add(AuditEvent(
+        league_id=league_id, actor_user_id=member.user_id,
+        subject_user_id=trade.proposer_user_id, event_type="trade.accepted",
+        detail=f"Trade {trade.id} accepted and sent to the commissioner.",
+    ))
+    return trade
+
+
+def approve_trade(
+    session: Session, league_id: str, trade_id: str, principal: Principal,
+    *, now: datetime | None = None,
+) -> TradeProposal:
+    _league, commissioner = require_commissioner(session, league_id, principal)
+    trade = _locked_trade(session, league_id, trade_id)
+    decided_at = now or utc_now()
+    if trade.status != "accepted":
+        raise DomainError("Only an accepted trade can be approved.", 409, "trade_state_conflict")
+    if decided_at >= _aware_utc(trade.expires_at):
+        trade.status = "expired"
+        raise DomainError("The 36-hour trade window expired.", 409, "trade_expired")
+    roster = current_roster(session, league_id)
+    assets = list(session.scalars(select(TradeAsset).where(TradeAsset.trade_id == trade.id)))
+    if any(roster.get(asset.player_id, (None, ""))[0] != asset.from_user_id for asset in assets):
+        trade.status = "rejected"
+        trade.decided_at = decided_at
+        trade.decided_by_user_id = commissioner.id
+        raise DomainError("Player ownership changed before approval.", 409, "trade_ownership_changed")
+    trade.status = "approved"
+    trade.decided_at = decided_at
+    trade.decided_by_user_id = commissioner.id
+    session.add(AuditEvent(
+        league_id=league_id, actor_user_id=commissioner.id,
+        subject_user_id=trade.proposer_user_id, event_type="trade.approved",
+        detail=f"Trade {trade.id} approved; {len(assets)} player ownership events applied.",
+    ))
+    return trade
 
 
 NEW_YORK = ZoneInfo("America/New_York")

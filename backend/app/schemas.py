@@ -140,6 +140,38 @@ class FaabProcessSummary(BaseModel):
     awards: list[FaabAwardView]
 
 
+class TradeCreate(BaseModel):
+    counterparty_user_id: str = Field(min_length=1, max_length=36)
+    offered_player_ids: list[str] = Field(min_length=1, max_length=15)
+    requested_player_ids: list[str] = Field(min_length=1, max_length=15)
+
+
+class TradeAssetView(BaseModel):
+    from_user_id: str
+    to_user_id: str
+    player_id: str
+    player_name: str
+
+
+class TradeView(BaseModel):
+    id: str
+    league_id: str
+    proposer_user_id: str
+    counterparty_user_id: str
+    status: str
+    created_at: datetime
+    expires_at: datetime
+    responded_at: datetime | None
+    decided_at: datetime | None
+    assets: list[TradeAssetView]
+
+
+class RosterPlayerView(BaseModel):
+    player_id: str
+    player_name: str
+    owner_user_id: str
+
+
 class CareerPlayerInput(BaseModel):
     player_id: str = Field(min_length=1, max_length=80)
     position: Position

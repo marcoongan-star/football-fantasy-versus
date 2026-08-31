@@ -208,6 +208,42 @@ class FaabAward(Base):
     processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class TradeProposal(Base):
+    __tablename__ = "trade_proposals"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('proposed', 'accepted', 'approved', 'rejected', 'expired')",
+            name="ck_trade_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    league_id: Mapped[str] = mapped_column(ForeignKey("leagues.id"), index=True)
+    proposer_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    counterparty_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="proposed", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decided_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
+class TradeAsset(Base):
+    __tablename__ = "trade_assets"
+    __table_args__ = (
+        UniqueConstraint("trade_id", "player_id", name="uq_trade_player"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    trade_id: Mapped[str] = mapped_column(ForeignKey("trade_proposals.id"), index=True)
+    league_id: Mapped[str] = mapped_column(ForeignKey("leagues.id"), index=True)
+    from_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    to_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    player_id: Mapped[str] = mapped_column(String(80), index=True)
+    player_name: Mapped[str] = mapped_column(String(120))
+
+
 class CareerMatch(Base):
     __tablename__ = "career_matches"
     __table_args__ = (
