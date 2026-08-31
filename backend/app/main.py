@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 from .auth import Principal, current_principal
 from .career_api import install_career_routes
 from .database import Database
-from .models import AuditEvent, DraftPick, DraftSession, FaabBid, FaabWindow, League, LeagueMember
+from .models import AuditEvent, DraftPick, DraftSession, FaabBid, FaabWindow, League, LeagueMember, TradeAsset, TradeProposal
 from .schemas import (
     AuditEventView,
     DraftPickCreate,
@@ -31,10 +31,18 @@ from .schemas import (
     LeagueCreated,
     LeagueView,
     MemberView,
+    RosterPlayerView,
+    TradeAssetView,
+    TradeCreate,
+    TradeView,
     UserView,
 )
 from .services import (
     DomainError,
+    accept_trade,
+    approve_trade,
+    create_trade,
+    current_roster,
     create_faab_window,
     create_league,
     draft_seat_order,
@@ -86,6 +94,31 @@ def _draft_view(session: Session, draft: DraftSession) -> DraftStateView:
             )
             for pick in picks
         ],
+    )
+
+
+def _trade_view(session: Session, trade: TradeProposal) -> TradeView:
+    assets = list(session.scalars(
+        select(TradeAsset)
+        .where(TradeAsset.trade_id == trade.id)
+        .order_by(TradeAsset.from_user_id, TradeAsset.player_name)
+    ))
+    return TradeView(
+        id=trade.id,
+        league_id=trade.league_id,
+        proposer_user_id=trade.proposer_user_id,
+        counterparty_user_id=trade.counterparty_user_id,
+        status=trade.status,
+        created_at=trade.created_at,
+        expires_at=trade.expires_at,
+        responded_at=trade.responded_at,
+        decided_at=trade.decided_at,
+        assets=[TradeAssetView(
+            from_user_id=asset.from_user_id,
+            to_user_id=asset.to_user_id,
+            player_id=asset.player_id,
+            player_name=asset.player_name,
+        ) for asset in assets],
     )
 
 
@@ -468,6 +501,71 @@ def create_app(
             unclaimed_count=len(awards) - awarded_count,
             awards=awards,
         )
+
+    @app.get("/v1/leagues/{league_id}/rosters", response_model=list[RosterPlayerView])
+    def get_rosters_endpoint(
+        league_id: str,
+        principal: Principal = Depends(current_principal),
+        session: Session = Depends(session_dependency),
+    ) -> list[RosterPlayerView]:
+        require_active_member(session, league_id, principal)
+        roster = current_roster(session, league_id)
+        return [
+            RosterPlayerView(player_id=player_id, player_name=name, owner_user_id=owner)
+            for player_id, (owner, name) in sorted(roster.items(), key=lambda item: item[1][1])
+        ]
+
+    @app.post("/v1/leagues/{league_id}/trades", response_model=TradeView, status_code=201)
+    def create_trade_endpoint(
+        league_id: str,
+        payload: TradeCreate,
+        principal: Principal = Depends(current_principal),
+        session: Session = Depends(session_dependency),
+    ) -> TradeView:
+        with session.begin():
+            trade = create_trade(
+                session, league_id, principal,
+                counterparty_user_id=payload.counterparty_user_id,
+                offered_player_ids=payload.offered_player_ids,
+                requested_player_ids=payload.requested_player_ids,
+            )
+        return _trade_view(session, trade)
+
+    @app.get("/v1/leagues/{league_id}/trades", response_model=list[TradeView])
+    def list_trades_endpoint(
+        league_id: str,
+        principal: Principal = Depends(current_principal),
+        session: Session = Depends(session_dependency),
+    ) -> list[TradeView]:
+        require_active_member(session, league_id, principal)
+        trades = list(session.scalars(
+            select(TradeProposal)
+            .where(TradeProposal.league_id == league_id)
+            .order_by(TradeProposal.created_at.desc(), TradeProposal.id)
+        ))
+        return [_trade_view(session, trade) for trade in trades]
+
+    @app.post("/v1/leagues/{league_id}/trades/{trade_id}/accept", response_model=TradeView)
+    def accept_trade_endpoint(
+        league_id: str,
+        trade_id: str,
+        principal: Principal = Depends(current_principal),
+        session: Session = Depends(session_dependency),
+    ) -> TradeView:
+        with session.begin():
+            trade = accept_trade(session, league_id, trade_id, principal)
+        return _trade_view(session, trade)
+
+    @app.post("/v1/leagues/{league_id}/trades/{trade_id}/approve", response_model=TradeView)
+    def approve_trade_endpoint(
+        league_id: str,
+        trade_id: str,
+        principal: Principal = Depends(current_principal),
+        session: Session = Depends(session_dependency),
+    ) -> TradeView:
+        with session.begin():
+            trade = approve_trade(session, league_id, trade_id, principal)
+        return _trade_view(session, trade)
 
     return app
 
