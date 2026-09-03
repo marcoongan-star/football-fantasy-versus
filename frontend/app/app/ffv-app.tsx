@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
+  acceptTrade,
+  approveTrade,
   createLeague,
   demoWorkspace,
   isApiConfigured,
@@ -10,8 +12,11 @@ import {
   listMyLeagues,
   loadFaabBoard,
   loadLeagueWorkspace,
+  loadRosters,
+  loadTrades,
   openFaabWindow,
   processDueFaabWindows,
+  proposeTrade,
   saveFaabBid,
   startDraft,
   submitDraftPick,
@@ -21,9 +26,12 @@ import {
   type LeagueCreated,
   type LeagueRecord,
   type LeagueWorkspace,
+  type RosterPlayer,
+  type TradeRecord,
 } from "./ffv-api";
 
 type Connection = "loading" | "api" | "demo" | "error";
+type AppView = "league" | "draft" | "trades" | "career";
 
 const managerNames: Record<string, string> = {
   marco: "Wirtz Case Scenario",
@@ -32,8 +40,8 @@ const managerNames: Record<string, string> = {
   rosa: "Press Resistant",
 };
 
-export function FfvApp({ initialView = "career" }: { initialView?: "league" | "draft" | "career" }) {
-  const [view, setView] = useState<"league" | "draft" | "career">(initialView);
+export function FfvApp({ initialView = "career" }: { initialView?: AppView }) {
+  const [view, setView] = useState<AppView>(initialView);
   const [asOf, setAsOf] = useState<"current" | "7" | "8">("current");
   const [workspace, setWorkspace] = useState<LeagueWorkspace>(demoWorkspace());
   const apiConfigured = isApiConfigured();
@@ -109,9 +117,9 @@ export function FfvApp({ initialView = "career" }: { initialView?: "league" | "d
         <Link href="/" className="app-logo"><span>FFV</span><small>Football Fantasy Versus</small></Link>
         <div className="league-switcher"><small>ACTIVE LEAGUE</small><strong>{hasSelectedLeague ? workspace.leagueName : "Choose a league"}</strong><span>{hasSelectedLeague ? `${workspace.league.active_member_count} of ${workspace.league.max_members} managers` : "Create one or enter an invite"}</span></div>
         <nav aria-label="League workspace">
-          {(["league", "draft", "career"] as const).map((item) => (
+          {(["league", "draft", "trades", "career"] as const).map((item) => (
             <button key={item} className={view === item ? "active" : ""} onClick={() => setView(item)}>
-              <span>{item === "league" ? "01" : item === "draft" ? "02" : "03"}</span>{item === "career" ? "Career mode" : item}
+              <span>{item === "league" ? "01" : item === "draft" ? "02" : item === "trades" ? "03" : "04"}</span>{item === "career" ? "Career mode" : item}
             </button>
           ))}
         </nav>
@@ -120,7 +128,7 @@ export function FfvApp({ initialView = "career" }: { initialView?: "league" | "d
 
       <section className="app-content">
         <header className="app-topline">
-          <div><span className="overline">LEAGUE WORKSPACE</span><h1>{view === "career" ? "Career command centre" : view === "draft" ? "Draft room" : "League overview"}</h1></div>
+          <div><span className="overline">LEAGUE WORKSPACE</span><h1>{view === "career" ? "Career command centre" : view === "draft" ? "Draft room" : view === "trades" ? "Trade room" : "League overview"}</h1></div>
           <div className="app-top-actions">
             {apiConfigured && leagues.length > 0 && <select aria-label="Active league" value={selectedLeagueId} onChange={(event) => selectLeague(event.target.value)}><option value="">Choose league</option>{leagues.map((league) => <option key={league.id} value={league.id}>{league.name}</option>)}</select>}
             <div className={`source-badge ${connection}`}><span />{connection === "api" ? "Persistent API" : connection === "loading" ? "Syncing" : connection === "error" ? "API needs attention" : "Seeded preview"}</div>
@@ -171,6 +179,7 @@ export function FfvApp({ initialView = "career" }: { initialView?: "league" | "d
 
         {hasSelectedLeague && view === "league" && <>{apiConfigured && <LeagueAccessPanel onAccepted={acceptLeague} error={accessError} newInvite={newInvite} />}<FaabWorkspace connection={connection} league={workspace.league} viewer={workspace.viewer} board={workspace.faab} onBoardUpdated={(faab) => setWorkspace((current) => ({ ...current, faab }))} /></>}
         {hasSelectedLeague && view === "draft" && <DraftWorkspace key={`${workspace.source}-${workspace.draft?.current_pick ?? "pending"}`} draft={workspace.draft} connection={connection} leagueId={workspace.league.id} viewer={workspace.viewer} managerNames={displayNames} onDraftUpdated={(draft) => setWorkspace((current) => ({ ...current, draft }))} />}
+        {hasSelectedLeague && view === "trades" && <TradeWorkspace connection={connection} league={workspace.league} viewer={workspace.viewer} managerNames={displayNames} />}
       </section>
     </main>
   );
@@ -374,6 +383,167 @@ function FaabBidCard({ window, leagueId, balance, onSaved }: { window: FaabWindo
   }
 
   return <article className="workspace-panel faab-live-card"><div className="panel-title"><div><small>OPEN BLIND CLAIM</small><h2>{window.player_name}</h2></div><span className="locked-pill">{formatFaabDeadline(window.process_at)}</span></div><form onSubmit={(event) => { event.preventDefault(); void save(); }}><label>YOUR PRIVATE BID<div><input aria-label={`Private FAAB bid for ${window.player_name}`} type="number" min="0" max={balance} value={bid} onChange={(event) => { setBid(event.target.value); setPendingCommandId(""); setError(""); }} /><span>FAAB</span></div></label><button disabled={busy || !Number.isInteger(Number(bid)) || Number(bid) < 0 || Number(bid) > balance}>{busy ? "Saving…" : window.my_bid_amount === null ? "Save blind bid →" : "Update blind bid →"}</button></form><p>{window.my_bid_amount === null ? "No bid saved yet." : `Your saved bid is ${window.my_bid_amount} FAAB. Other amounts remain hidden.`}</p>{error && <p className="form-error" role="alert">{error} {pendingCommandId && "Retrying will reuse the same command."}</p>}</article>;
+}
+
+const seededRoster: RosterPlayer[] = [
+  { player_id: "wirtz", player_name: "Florian Wirtz", owner_user_id: "marco" },
+  { player_id: "watkins", player_name: "Ollie Watkins", owner_user_id: "marco" },
+  { player_id: "alisson", player_name: "Alisson", owner_user_id: "marco" },
+  { player_id: "salah", player_name: "Mohamed Salah", owner_user_id: "amina" },
+  { player_id: "rice", player_name: "Declan Rice", owner_user_id: "amina" },
+  { player_id: "saliba", player_name: "William Saliba", owner_user_id: "amina" },
+];
+
+function TradeWorkspace({ connection, league, viewer, managerNames: names }: { connection: Connection; league: LeagueRecord; viewer: LeagueWorkspace["viewer"]; managerNames: Record<string, string> }) {
+  const [roster, setRoster] = useState<RosterPlayer[]>(connection === "api" ? [] : seededRoster);
+  const [trades, setTrades] = useState<TradeRecord[]>([]);
+  const [counterparty, setCounterparty] = useState("");
+  const [offeredPlayer, setOfferedPlayer] = useState("");
+  const [requestedPlayer, setRequestedPlayer] = useState("");
+  const [state, setState] = useState<"ready" | "loading" | "saving" | "error">(connection === "api" ? "loading" : "ready");
+  const [message, setMessage] = useState("");
+
+  const members = league.members.length > 0
+    ? league.members.filter((member) => member.status === "active")
+    : [
+        { user_id: "marco", display_name: "Wirtz Case Scenario", role: "commissioner" as const },
+        { user_id: "amina", display_name: "False Nine FC", role: "member" as const },
+      ];
+  const counterparties = members.filter((member) => member.user_id !== viewer.id);
+  const selectedCounterparty = counterparty || counterparties[0]?.user_id || "";
+  const myPlayers = roster.filter((player) => player.owner_user_id === viewer.id);
+  const theirPlayers = roster.filter((player) => player.owner_user_id === selectedCounterparty);
+  const isCommissioner = league.commissioner_user_id === viewer.id;
+
+  useEffect(() => {
+    if (connection !== "api") return;
+    const controller = new AbortController();
+    Promise.all([
+      loadRosters(league.id, controller.signal),
+      loadTrades(league.id, controller.signal),
+    ]).then(([nextRoster, nextTrades]) => {
+      setRoster(nextRoster);
+      setTrades(nextTrades);
+      setState("ready");
+    }).catch((error: Error) => {
+      setMessage(error.message);
+      setState("error");
+    });
+    return () => controller.abort();
+  }, [connection, league.id]);
+
+  async function refresh() {
+    const [nextRoster, nextTrades] = await Promise.all([loadRosters(league.id), loadTrades(league.id)]);
+    setRoster(nextRoster);
+    setTrades(nextTrades);
+  }
+
+  async function submitProposal() {
+    if (!selectedCounterparty || !offeredPlayer || !requestedPlayer) return;
+    setState("saving");
+    setMessage("");
+    try {
+      if (connection === "api") {
+        await proposeTrade(league.id, selectedCounterparty, [offeredPlayer], [requestedPlayer]);
+        await refresh();
+      } else {
+        const now = new Date();
+        const next: TradeRecord = {
+          id: `preview-${Date.now()}`,
+          league_id: league.id,
+          proposer_user_id: viewer.id,
+          counterparty_user_id: selectedCounterparty,
+          status: "proposed",
+          created_at: now.toISOString(),
+          expires_at: new Date(now.getTime() + 36 * 60 * 60 * 1000).toISOString(),
+          responded_at: null,
+          decided_at: null,
+          assets: [
+            { from_user_id: viewer.id, to_user_id: selectedCounterparty, player_id: offeredPlayer, player_name: roster.find((player) => player.player_id === offeredPlayer)?.player_name ?? offeredPlayer },
+            { from_user_id: selectedCounterparty, to_user_id: viewer.id, player_id: requestedPlayer, player_name: roster.find((player) => player.player_id === requestedPlayer)?.player_name ?? requestedPlayer },
+          ],
+        };
+        setTrades((current) => [next, ...current]);
+      }
+      setOfferedPlayer("");
+      setRequestedPlayer("");
+      setMessage("Proposal saved. The receiving manager must accept it before commissioner review.");
+      setState("ready");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "FFV could not save that trade.");
+      setState("error");
+    }
+  }
+
+  async function transition(trade: TradeRecord, action: "accept" | "approve") {
+    setState("saving");
+    setMessage("");
+    try {
+      if (connection === "api") {
+        if (action === "accept") await acceptTrade(league.id, trade.id);
+        else await approveTrade(league.id, trade.id);
+        await refresh();
+      } else {
+        const timestamp = new Date().toISOString();
+        setTrades((current) => current.map((item) => item.id === trade.id ? {
+          ...item,
+          status: action === "accept" ? "accepted" : "approved",
+          responded_at: action === "accept" ? timestamp : item.responded_at,
+          decided_at: action === "approve" ? timestamp : item.decided_at,
+        } : item));
+        if (action === "approve") {
+          const transfers = Object.fromEntries(trade.assets.map((asset) => [asset.player_id, asset.to_user_id]));
+          setRoster((current) => current.map((player) => transfers[player.player_id] ? { ...player, owner_user_id: transfers[player.player_id] } : player));
+        }
+      }
+      setMessage(action === "accept" ? "Recipient accepted. The trade is waiting for commissioner approval." : "Commissioner approved. The roster projection now includes the transfer events.");
+      setState("ready");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "FFV could not move that trade forward.");
+      setState("error");
+    }
+  }
+
+  return <>
+    <div className="trade-summary">
+      <article><small>OPEN WORKFLOWS</small><strong>{trades.filter((trade) => trade.status === "proposed" || trade.status === "accepted").length}</strong><span>consent before approval</span></article>
+      <article><small>APPROVAL WINDOW</small><strong>36h</strong><span>one shared deadline</span></article>
+      <article><small>OWNERSHIP MODEL</small><strong>Events</strong><span>draft facts + approved transfers</span></article>
+    </div>
+
+    <div className="trade-layout">
+      <article className="workspace-panel trade-builder">
+        <div className="panel-title"><div><small>MANAGER PROPOSAL</small><h2>Build a one-for-one trade</h2></div><span>{connection === "api" ? "Persistent command" : "Interactive preview"}</span></div>
+        <form onSubmit={(event) => { event.preventDefault(); void submitProposal(); }}>
+          <label>TRADE WITH<select value={selectedCounterparty} onChange={(event) => { setCounterparty(event.target.value); setRequestedPlayer(""); }} disabled={counterparties.length === 0}>{counterparties.map((member) => <option key={member.user_id} value={member.user_id}>{member.display_name}</option>)}</select></label>
+          <label>YOU OFFER<select required value={offeredPlayer} onChange={(event) => setOfferedPlayer(event.target.value)}><option value="">Choose your player</option>{myPlayers.map((player) => <option key={player.player_id} value={player.player_id}>{player.player_name}</option>)}</select></label>
+          <label>YOU REQUEST<select required value={requestedPlayer} onChange={(event) => setRequestedPlayer(event.target.value)}><option value="">Choose their player</option>{theirPlayers.map((player) => <option key={player.player_id} value={player.player_id}>{player.player_name}</option>)}</select></label>
+          <button disabled={state === "saving" || !offeredPlayer || !requestedPlayer}>{state === "saving" ? "Saving…" : "Send proposal →"}</button>
+        </form>
+        <p>The API checks both owners now and checks them again at approval, so overlapping proposals cannot transfer the same player twice.</p>
+        {message && <p className={state === "error" ? "form-error" : "trade-message"} role="status">{message}</p>}
+      </article>
+
+      <aside className="workspace-panel roster-panel">
+        <div className="panel-title"><div><small>CURRENT PROJECTION</small><h2>Roster ownership</h2></div><span>{roster.length} players</span></div>
+        {members.map((member) => <section key={member.user_id}><header><strong>{member.display_name}</strong><span>{roster.filter((player) => player.owner_user_id === member.user_id).length}</span></header>{roster.filter((player) => player.owner_user_id === member.user_id).map((player) => <p key={player.player_id}>{player.player_name}</p>)}</section>)}
+      </aside>
+    </div>
+
+    <section className="workspace-panel trade-timeline">
+      <div className="panel-title"><div><small>AUDITABLE STATE MACHINE</small><h2>Trade decisions</h2></div><span>Proposed → accepted → approved</span></div>
+      {state === "loading" && <p className="trade-empty">Loading trade history…</p>}
+      {state !== "loading" && trades.length === 0 && <p className="trade-empty">No proposals yet. Build the first trade above.</p>}
+      {trades.map((trade) => {
+        const offered = trade.assets.filter((asset) => asset.from_user_id === trade.proposer_user_id).map((asset) => asset.player_name).join(", ");
+        const requested = trade.assets.filter((asset) => asset.from_user_id === trade.counterparty_user_id).map((asset) => asset.player_name).join(", ");
+        const canAccept = trade.status === "proposed" && (connection !== "api" || trade.counterparty_user_id === viewer.id);
+        const canApprove = trade.status === "accepted" && (connection !== "api" || isCommissioner);
+        return <article className="trade-card" key={trade.id}><header><i className={`trade-status ${trade.status}`}>{trade.status}</i><time dateTime={trade.expires_at}>Deadline {new Date(trade.expires_at).toLocaleString()}</time></header><div><strong>{names[trade.proposer_user_id] ?? trade.proposer_user_id}</strong><span>offers {offered}</span><b>⇄</b><strong>{names[trade.counterparty_user_id] ?? trade.counterparty_user_id}</strong><span>offers {requested}</span></div>{canAccept && <button onClick={() => void transition(trade, "accept")}>{connection === "api" ? "Accept as recipient →" : "Preview recipient acceptance →"}</button>}{canApprove && <button onClick={() => void transition(trade, "approve")}>{connection === "api" ? "Approve as commissioner →" : "Preview commissioner approval →"}</button>}</article>;
+      })}
+    </section>
+    <p className="workspace-disclaimer">{connection === "api" ? "Persistent league workflow. Authorization and ownership are enforced by FastAPI." : "Seeded recruiter preview. Use the controls to walk through the same state transitions enforced by the API."}</p>
+  </>;
 }
 
 function formatFaabDeadline(value: string): string {

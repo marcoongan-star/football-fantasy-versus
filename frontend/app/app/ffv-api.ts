@@ -111,6 +111,32 @@ export type FaabProcessSummary = {
   }>;
 };
 
+export type RosterPlayer = {
+  player_id: string;
+  player_name: string;
+  owner_user_id: string;
+};
+
+export type TradeAsset = {
+  from_user_id: string;
+  to_user_id: string;
+  player_id: string;
+  player_name: string;
+};
+
+export type TradeRecord = {
+  id: string;
+  league_id: string;
+  proposer_user_id: string;
+  counterparty_user_id: string;
+  status: "proposed" | "accepted" | "approved" | "rejected" | "expired";
+  created_at: string;
+  expires_at: string;
+  responded_at: string | null;
+  decided_at: string | null;
+  assets: TradeAsset[];
+};
+
 const seededDraft: DraftState = {
   status: "active",
   current_pick: 16,
@@ -265,6 +291,42 @@ export function saveFaabBid(
 
 export function processDueFaabWindows(leagueId: string): Promise<FaabProcessSummary> {
   return apiRequest<FaabProcessSummary>(`/v1/leagues/${leagueId}/faab/process-due`, {
+    method: "POST",
+  });
+}
+
+export function loadRosters(leagueId: string, signal?: AbortSignal): Promise<RosterPlayer[]> {
+  return apiRequest<RosterPlayer[]>(`/v1/leagues/${leagueId}/rosters`, { signal });
+}
+
+export function loadTrades(leagueId: string, signal?: AbortSignal): Promise<TradeRecord[]> {
+  return apiRequest<TradeRecord[]>(`/v1/leagues/${leagueId}/trades`, { signal });
+}
+
+export function proposeTrade(
+  leagueId: string,
+  counterpartyUserId: string,
+  offeredPlayerIds: string[],
+  requestedPlayerIds: string[],
+): Promise<TradeRecord> {
+  return apiRequest<TradeRecord>(`/v1/leagues/${leagueId}/trades`, {
+    method: "POST",
+    body: JSON.stringify({
+      counterparty_user_id: counterpartyUserId,
+      offered_player_ids: offeredPlayerIds,
+      requested_player_ids: requestedPlayerIds,
+    }),
+  });
+}
+
+export function acceptTrade(leagueId: string, tradeId: string): Promise<TradeRecord> {
+  return apiRequest<TradeRecord>(`/v1/leagues/${leagueId}/trades/${tradeId}/accept`, {
+    method: "POST",
+  });
+}
+
+export function approveTrade(leagueId: string, tradeId: string): Promise<TradeRecord> {
+  return apiRequest<TradeRecord>(`/v1/leagues/${leagueId}/trades/${tradeId}/approve`, {
     method: "POST",
   });
 }
