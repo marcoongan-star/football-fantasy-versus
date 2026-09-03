@@ -143,7 +143,7 @@ To use real persistent leagues rather than the seeded preview, copy `frontend/.e
 
 Run checks with `pytest` inside `backend`, then `pnpm lint`, `pnpm build`, and the Node tests inside `frontend`.
 
-See [Milestone 2](docs/milestone-2.md) for leagues and membership, [Milestone 3](docs/milestone-3.md) for the snake-draft state machine, [Milestone 4](docs/milestone-4.md) for its public interactive preview, [Milestone 5](docs/milestone-5.md) for Career Mode simulation, [Milestone 6](docs/milestone-6.md) for the public head-to-head slice, [Milestone 7](docs/milestone-7.md) for immutable league history, [Milestone 8](docs/milestone-8.md) for derived standings and corrections, [Milestone 9](docs/milestone-9.md) for the reconnectable private draft workspace, [Milestone 10](docs/milestone-10.md) for natural-key retry safety, [Milestone 11](docs/milestone-11.md) for durable client command identity, [Milestone 12](docs/milestone-12.md) for private FAAB bidding and deterministic awards, [Milestone 13](docs/milestone-13.md) for the first persistent league onboarding flow, [Milestone 14](docs/milestone-14.md) for the first real browser draft command, [Milestone 15](docs/milestone-15.md) for the persistent blind-FAAB browser flow, [Milestone 16](docs/milestone-16.md) for commissioner-controlled due-window resolution, and [Milestone 17](docs/milestone-17.md) for auditable 36-hour trades.
+See [Milestone 2](docs/milestone-2.md) for leagues and membership, [Milestone 3](docs/milestone-3.md) for the snake-draft state machine, [Milestone 4](docs/milestone-4.md) for its public interactive preview, [Milestone 5](docs/milestone-5.md) for Career Mode simulation, [Milestone 6](docs/milestone-6.md) for the public head-to-head slice, [Milestone 7](docs/milestone-7.md) for immutable league history, [Milestone 8](docs/milestone-8.md) for derived standings and corrections, [Milestone 9](docs/milestone-9.md) for the reconnectable private draft workspace, [Milestone 10](docs/milestone-10.md) for natural-key retry safety, [Milestone 11](docs/milestone-11.md) for durable client command identity, [Milestone 12](docs/milestone-12.md) for private FAAB bidding and deterministic awards, [Milestone 13](docs/milestone-13.md) for the first persistent league onboarding flow, [Milestone 14](docs/milestone-14.md) for the first real browser draft command, [Milestone 15](docs/milestone-15.md) for the persistent blind-FAAB browser flow, [Milestone 16](docs/milestone-16.md) for commissioner-controlled due-window resolution, [Milestone 17](docs/milestone-17.md) for auditable 36-hour trades, and [Milestone 18](docs/milestone-18.md) for the browser trade command surface.
 
 ## Core invariants
 
@@ -176,7 +176,7 @@ Free-tier limits are treated as system constraints: the demo will retain provena
 3. Add transactionally safe snake drafting. **Complete**
 4. Add small-league auction drafting and blind FAAB.
 5. Version scoring rules and calculate Wirtz Ratings.
-6. Add commissioner-reviewed trades and expiration. **Complete (API and ownership projection)**
+6. Add commissioner-reviewed trades and expiration. **Complete (API, ownership projection, and browser workflow)**
 7. Simulate Career Mode fixtures with tactics and fatigue.
 8. Connect verified production sign-in and hosted PostgreSQL.
 9. Wire remaining commissioner controls to authenticated browser commands; draft picks and blind FAAB bidding are complete.
