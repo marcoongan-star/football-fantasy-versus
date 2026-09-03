@@ -75,3 +75,15 @@ test("server-renders the blind FAAB workspace without exposing bids", async () =
   assert.match(html, /Equal amounts use hidden waiver priority/i);
   assert.doesNotMatch(html, /Manager 1 bid|Manager 2 bid/i);
 });
+
+test("server-renders the interactive trade state machine", async () => {
+  const response = await render("/app/trades");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /Trade Room — FFV/);
+  assert.match(html, /Build a one-for-one trade/i);
+  assert.match(html, /Proposed → accepted → approved/i);
+  assert.match(html, /36h/);
+  assert.match(html, /checks them again at approval/i);
+  assert.match(html, /Roster ownership/i);
+});
