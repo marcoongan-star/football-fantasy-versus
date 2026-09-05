@@ -277,6 +277,31 @@ class CareerMatch(Base):
     )
 
 
+class CareerTacticsSelection(Base):
+    __tablename__ = "career_tactics_selections"
+    __table_args__ = (
+        UniqueConstraint(
+            "league_id", "user_id", "gameweek", name="uq_career_tactics_manager_week"
+        ),
+        CheckConstraint("gameweek >= 1", name="ck_career_tactics_gameweek"),
+        CheckConstraint(
+            "mentality IN ('balanced', 'attacking')",
+            name="ck_career_tactics_mentality",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    league_id: Mapped[str] = mapped_column(ForeignKey("leagues.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    gameweek: Mapped[int] = mapped_column(Integer, index=True)
+    formation: Mapped[str] = mapped_column(String(5))
+    mentality: Mapped[str] = mapped_column(String(20))
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
 class CareerMatchVoid(Base):
     __tablename__ = "career_match_voids"
 

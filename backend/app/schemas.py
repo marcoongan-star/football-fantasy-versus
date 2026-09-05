@@ -187,6 +187,23 @@ class CareerTeamInput(BaseModel):
     starters: list[CareerPlayerInput] = Field(min_length=11, max_length=11)
 
 
+class CareerTacticsInput(BaseModel):
+    formation: str = Field(min_length=5, max_length=5)
+    mentality: Mentality
+
+
+class CareerTacticsView(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    league_id: str
+    user_id: str
+    gameweek: int
+    formation: str
+    mentality: Mentality
+    submitted_at: datetime
+    updated_at: datetime
+
+
 class CareerSimulationRequest(BaseModel):
     home: CareerTeamInput
     away: CareerTeamInput
