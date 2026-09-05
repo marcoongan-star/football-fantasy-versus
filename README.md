@@ -91,6 +91,7 @@ docs/       Product decisions, data flows, and milestone explanations
 - Interactive, resettable public draft preview that makes the snake-order reversal visible without requiring login.
 - Formation-aware Career Mode simulation with tactics, fatigue, expected goals, home advantage, and seeded replay.
 - Interactive public Career head-to-head preview with formation and mentality controls.
+- Manager-owned weekly Career tactics with authenticated, retry-safe database updates.
 - Server-authoritative private draft workspace with snake-order reversal, a 45-second presentation clock, accepted-pick cursor, and reconnect-safe state replacement.
 - Persistent create/join/switch league onboarding through the typed API, including reusable commissioner invites and a valid pre-draft state.
 - Persistent browser draft picks with authenticated turn gating and retry-safe command identity.
