@@ -137,6 +137,16 @@ export type TradeRecord = {
   assets: TradeAsset[];
 };
 
+export type CareerTactics = {
+  league_id: string;
+  user_id: string;
+  gameweek: number;
+  formation: "4-3-3" | "4-4-2" | "3-5-2";
+  mentality: "balanced" | "attacking";
+  submitted_at: string;
+  updated_at: string;
+};
+
 const seededDraft: DraftState = {
   status: "active",
   current_pick: 16,
@@ -328,6 +338,18 @@ export function acceptTrade(leagueId: string, tradeId: string): Promise<TradeRec
 export function approveTrade(leagueId: string, tradeId: string): Promise<TradeRecord> {
   return apiRequest<TradeRecord>(`/v1/leagues/${leagueId}/trades/${tradeId}/approve`, {
     method: "POST",
+  });
+}
+
+export function saveCareerTactics(
+  leagueId: string,
+  gameweek: number,
+  formation: CareerTactics["formation"],
+  mentality: CareerTactics["mentality"],
+): Promise<CareerTactics> {
+  return apiRequest<CareerTactics>(`/v1/leagues/${leagueId}/career/tactics/${gameweek}`, {
+    method: "POST",
+    body: JSON.stringify({ formation, mentality }),
   });
 }
 

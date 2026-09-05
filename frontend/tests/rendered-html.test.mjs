@@ -48,6 +48,8 @@ test("server-renders the separate league workspace", async () => {
   assert.match(html, /Separate career table/i);
   assert.match(html, /Seeded preview/i);
   assert.match(html, /Immutable event history/i);
+  assert.match(html, /Set tactics/i);
+  assert.match(html, /Friday · 5:00 PM/i);
 });
 
 test("server-renders the reconnectable draft room", async () => {

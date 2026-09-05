@@ -18,6 +18,7 @@ import {
   processDueFaabWindows,
   proposeTrade,
   saveFaabBid,
+  saveCareerTactics,
   startDraft,
   submitDraftPick,
   type DraftState,
@@ -32,6 +33,8 @@ import {
 
 type Connection = "loading" | "api" | "demo" | "error";
 type AppView = "league" | "draft" | "trades" | "career";
+type Formation = "4-3-3" | "4-4-2" | "3-5-2";
+type Mentality = "balanced" | "attacking";
 
 const managerNames: Record<string, string> = {
   marco: "Wirtz Case Scenario",
@@ -50,6 +53,11 @@ export function FfvApp({ initialView = "career" }: { initialView?: AppView }) {
   const [selectedLeagueId, setSelectedLeagueId] = useState(process.env.NEXT_PUBLIC_FFV_LEAGUE_ID ?? "");
   const [accessError, setAccessError] = useState("");
   const [newInvite, setNewInvite] = useState("");
+  const [formation, setFormation] = useState<Formation>("4-3-3");
+  const [mentality, setMentality] = useState<Mentality>("attacking");
+  const [editingTactics, setEditingTactics] = useState(false);
+  const [tacticsState, setTacticsState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [tacticsMessage, setTacticsMessage] = useState("");
 
   useEffect(() => {
     if (!apiConfigured) return;
@@ -111,6 +119,25 @@ export function FfvApp({ initialView = "career" }: { initialView?: AppView }) {
   const displayNames = { ...managerNames, ...realManagerNames };
   const hasSelectedLeague = !apiConfigured || Boolean(selectedLeagueId);
 
+  async function persistTactics() {
+    setTacticsState("saving");
+    setTacticsMessage("");
+    try {
+      if (apiConfigured) {
+        if (!selectedLeagueId) throw new Error("Choose a league before saving tactics.");
+        await saveCareerTactics(selectedLeagueId, 9, formation, mentality);
+        setTacticsMessage("Saved to the league API for gameweek 9.");
+      } else {
+        setTacticsMessage("Saved in this seeded preview for the current visit.");
+      }
+      setTacticsState("saved");
+      setEditingTactics(false);
+    } catch (error) {
+      setTacticsState("error");
+      setTacticsMessage(error instanceof Error ? error.message : "Tactics could not be saved.");
+    }
+  }
+
   return (
     <main className="ffv-workspace">
       <aside className="app-sidebar">
@@ -161,8 +188,17 @@ export function FfvApp({ initialView = "career" }: { initialView?: AppView }) {
 
               <article className="workspace-panel fixture-panel">
                 <div className="panel-title"><div><small>TACTICAL DEADLINE</small><h2>Friday · 5:00 PM</h2></div><span className="locked-pill">Commissioner rules</span></div>
-                <div className="pitch-card"><span className="formation">4–3–3</span><strong>Wirtz Case Scenario</strong><small>ATTACKING · FATIGUE 12%</small><div className="pitch-lines"><i /><i /><i /></div></div>
-                <div className="tactic-row"><div><small>FORMATION</small><strong>4–3–3</strong></div><div><small>MENTALITY</small><strong>Attacking</strong></div><button>Set lineup →</button></div>
+                <div className="pitch-card"><span className="formation">{formation.replaceAll("-", "–")}</span><strong>Wirtz Case Scenario</strong><small>{mentality.toUpperCase()} · FATIGUE 12%</small><div className="pitch-lines"><i /><i /><i /></div></div>
+                {!editingTactics ? (
+                  <div className="tactic-row"><div><small>FORMATION</small><strong>{formation}</strong></div><div><small>MENTALITY</small><strong>{mentality[0].toUpperCase() + mentality.slice(1)}</strong></div><button onClick={() => { setEditingTactics(true); setTacticsState("idle"); }}>Set tactics →</button></div>
+                ) : (
+                  <form className="tactic-editor" onSubmit={(event) => { event.preventDefault(); void persistTactics(); }}>
+                    <label>FORMATION<select value={formation} onChange={(event) => setFormation(event.target.value as Formation)}><option>4-3-3</option><option>4-4-2</option><option>3-5-2</option></select></label>
+                    <label>MENTALITY<select value={mentality} onChange={(event) => setMentality(event.target.value as Mentality)}><option value="balanced">Balanced</option><option value="attacking">Attacking</option></select></label>
+                    <button disabled={tacticsState === "saving"}>{tacticsState === "saving" ? "Saving…" : "Save GW 9 →"}</button>
+                  </form>
+                )}
+                {tacticsMessage && <p className={tacticsState === "error" ? "form-error" : "tactics-confirmation"} role="status">{tacticsMessage}</p>}
               </article>
             </div>
 
