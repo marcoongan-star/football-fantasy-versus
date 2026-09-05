@@ -62,6 +62,7 @@ class AuditEventView(BaseModel):
 
 
 class DraftPickCreate(BaseModel):
+    client_command_id: str = Field(min_length=8, max_length=100)
     player_id: str = Field(min_length=1, max_length=80)
     player_name: str = Field(min_length=1, max_length=120)
 
@@ -86,6 +87,91 @@ class DraftStateView(BaseModel):
     picks: list[DraftPickView]
 
 
+class FaabWindowCreate(BaseModel):
+    player_id: str = Field(min_length=1, max_length=80)
+    player_name: str = Field(min_length=1, max_length=120)
+
+
+class FaabWindowView(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    league_id: str
+    player_id: str
+    player_name: str
+    process_at: datetime
+    status: str
+
+
+class FaabWindowStateView(FaabWindowView):
+    my_bid_amount: int | None
+
+
+class FaabBoardView(BaseModel):
+    faab_balance: int
+    windows: list[FaabWindowStateView]
+
+
+class FaabBidCreate(BaseModel):
+    client_command_id: str = Field(min_length=8, max_length=100)
+    amount: int = Field(ge=0, le=100)
+
+
+class FaabBidReceipt(BaseModel):
+    window_id: str
+    amount: int
+    faab_balance: int
+    status: str
+
+
+class FaabAwardView(BaseModel):
+    window_id: str
+    winner_user_id: str | None
+    amount: int | None
+    player_id: str
+    player_name: str
+    processed_at: datetime
+
+
+class FaabProcessSummary(BaseModel):
+    processed_count: int
+    awarded_count: int
+    unclaimed_count: int
+    awards: list[FaabAwardView]
+
+
+class TradeCreate(BaseModel):
+    counterparty_user_id: str = Field(min_length=1, max_length=36)
+    offered_player_ids: list[str] = Field(min_length=1, max_length=15)
+    requested_player_ids: list[str] = Field(min_length=1, max_length=15)
+
+
+class TradeAssetView(BaseModel):
+    from_user_id: str
+    to_user_id: str
+    player_id: str
+    player_name: str
+
+
+class TradeView(BaseModel):
+    id: str
+    league_id: str
+    proposer_user_id: str
+    counterparty_user_id: str
+    status: str
+    created_at: datetime
+    expires_at: datetime
+    responded_at: datetime | None
+    decided_at: datetime | None
+    assets: list[TradeAssetView]
+
+
+class RosterPlayerView(BaseModel):
+    player_id: str
+    player_name: str
+    owner_user_id: str
+
+
 class CareerPlayerInput(BaseModel):
     player_id: str = Field(min_length=1, max_length=80)
     position: Position
@@ -99,6 +185,23 @@ class CareerTeamInput(BaseModel):
     formation: str = Field(min_length=5, max_length=5)
     mentality: Mentality
     starters: list[CareerPlayerInput] = Field(min_length=11, max_length=11)
+
+
+class CareerTacticsInput(BaseModel):
+    formation: str = Field(min_length=5, max_length=5)
+    mentality: Mentality
+
+
+class CareerTacticsView(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    league_id: str
+    user_id: str
+    gameweek: int
+    formation: str
+    mentality: Mentality
+    submitted_at: datetime
+    updated_at: datetime
 
 
 class CareerSimulationRequest(BaseModel):

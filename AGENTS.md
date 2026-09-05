@@ -14,6 +14,7 @@ Marco owns product and game-design decisions. Codex may implement, test, explain
 - Fifteen-player squads: 2 GK, 5 DEF, 5 MID, 3 FWD; maximum 3 from a real club.
 - More than 4 managers use snake draft; 4 or fewer may choose snake or auction.
 - Draft timer is 45 seconds. Blind FAAB starts at 100 and processes at 5 PM America/New_York.
+- FAAB awards must never have an unresolved equal bid. Because bids are blind, the client must not reject an amount based on another manager's hidden bid. Store a hidden deterministic priority key with every bid and use it after amount so the processor always has one winner without leaking bid information.
 - Trades require commissioner approval within 36 hours.
 - Real Performance and Career Mode maintain separate standings.
 - Career simulation is seeded and replayable. Home advantage is +0.15 xG.

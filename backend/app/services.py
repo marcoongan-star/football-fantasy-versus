@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import secrets
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -13,9 +15,14 @@ from .models import (
     DraftPick,
     DraftSeat,
     DraftSession,
+    FaabAward,
+    FaabBid,
+    FaabWindow,
     League,
     LeagueMember,
     User,
+    TradeAsset,
+    TradeProposal,
     utc_now,
 )
 
@@ -58,6 +65,29 @@ def get_or_create_user(session: Session, principal: Principal) -> User:
     return user
 
 
+def list_active_leagues(session: Session, principal: Principal) -> list[League]:
+    """Return leagues where the authenticated user currently has access."""
+    user = session.scalar(
+        select(User).where(
+            User.auth_provider == principal.provider,
+            User.provider_subject == principal.subject,
+        )
+    )
+    if user is None:
+        return []
+    return list(
+        session.scalars(
+            select(League)
+            .join(LeagueMember, LeagueMember.league_id == League.id)
+            .where(
+                LeagueMember.user_id == user.id,
+                LeagueMember.status == "active",
+            )
+            .order_by(League.created_at.desc(), League.id)
+        )
+    )
+
+
 def create_league(session: Session, principal: Principal, name: str) -> tuple[League, str]:
     user = get_or_create_user(session, principal)
     invite_code = _new_invite_code()
@@ -75,6 +105,8 @@ def create_league(session: Session, principal: Principal, name: str) -> tuple[Le
             user_id=user.id,
             role="commissioner",
             status="active",
+            faab_balance=100,
+            waiver_priority=1,
         )
     )
     session.add(
@@ -124,7 +156,14 @@ def join_league(session: Session, principal: Principal, invite_code: str) -> Lea
     if int(active_count or 0) >= league.max_members:
         raise DomainError("This league already has 15 managers.", 409, "league_full")
 
-    session.add(LeagueMember(league_id=league.id, user_id=user.id))
+    session.add(
+        LeagueMember(
+            league_id=league.id,
+            user_id=user.id,
+            faab_balance=100,
+            waiver_priority=int(active_count or 0) + 1,
+        )
+    )
     session.add(
         AuditEvent(
             league_id=league.id,
@@ -337,6 +376,7 @@ def submit_draft_pick(
     league_id: str,
     principal: Principal,
     *,
+    client_command_id: str,
     player_id: str,
     player_name: str,
 ) -> DraftSession:
@@ -348,20 +388,47 @@ def submit_draft_pick(
     )
     if draft is None:
         raise DomainError("The draft has not started.", 409, "draft_not_started")
-    if draft.status != "active":
-        raise DomainError("The draft is complete.", 409, "draft_complete")
 
     seats = draft_seat_order(session, draft.id)
-    if membership.user_id != expected_drafter(seats, draft.current_pick):
-        raise DomainError("It is not your turn to draft.", 409, "draft_wrong_turn")
-    already_selected = session.scalar(
-        select(DraftPick.id).where(
+    normalized_command_id = client_command_id.strip()
+    normalized_player_id = player_id.strip()
+    normalized_player_name = player_name.strip()
+    previous_command = session.scalar(
+        select(DraftPick).where(
             DraftPick.draft_session_id == draft.id,
-            DraftPick.player_id == player_id.strip(),
+            DraftPick.client_command_id == normalized_command_id,
+        )
+    )
+    if previous_command is not None:
+        if (
+            previous_command.user_id == membership.user_id
+            and previous_command.player_id == normalized_player_id
+            and previous_command.player_name == normalized_player_name
+        ):
+            return draft
+        raise DomainError(
+            "That command ID was already used for a different draft choice.",
+            409,
+            "draft_command_conflict",
+        )
+    if draft.status != "active":
+        raise DomainError("The draft is complete.", 409, "draft_complete")
+    already_selected = session.scalar(
+        select(DraftPick).where(
+            DraftPick.draft_session_id == draft.id,
+            DraftPick.player_id == normalized_player_id,
         )
     )
     if already_selected is not None:
+        if (
+            already_selected.user_id == membership.user_id
+            and already_selected.pick_number == draft.current_pick - 1
+            and already_selected.player_name == normalized_player_name
+        ):
+            return draft
         raise DomainError("That player has already been drafted.", 409, "player_unavailable")
+    if membership.user_id != expected_drafter(seats, draft.current_pick):
+        raise DomainError("It is not your turn to draft.", 409, "draft_wrong_turn")
 
     round_number = (draft.current_pick - 1) // len(seats) + 1
     session.add(
@@ -369,8 +436,9 @@ def submit_draft_pick(
             draft_session_id=draft.id,
             league_id=league_id,
             user_id=membership.user_id,
-            player_id=player_id.strip(),
-            player_name=player_name.strip(),
+            player_id=normalized_player_id,
+            player_name=normalized_player_name,
+            client_command_id=normalized_command_id,
             pick_number=draft.current_pick,
             round_number=round_number,
         )
@@ -380,7 +448,7 @@ def submit_draft_pick(
             league_id=league_id,
             actor_user_id=membership.user_id,
             event_type="draft.pick_made",
-            detail=f"Pick {draft.current_pick}: {player_name.strip()}.",
+            detail=f"Pick {draft.current_pick}: {normalized_player_name}.",
         )
     )
     draft.current_pick += 1
@@ -388,3 +456,435 @@ def submit_draft_pick(
         draft.status = "complete"
     session.flush()
     return draft
+
+
+def current_roster(session: Session, league_id: str) -> dict[str, tuple[str, str]]:
+    """Rebuild player ownership from draft facts and approved trade events."""
+    ownership = {
+        pick.player_id: (pick.user_id, pick.player_name)
+        for pick in session.scalars(
+            select(DraftPick)
+            .where(DraftPick.league_id == league_id)
+            .order_by(DraftPick.pick_number)
+        )
+    }
+    approved_assets = session.execute(
+        select(TradeAsset, TradeProposal)
+        .join(TradeProposal, TradeProposal.id == TradeAsset.trade_id)
+        .where(
+            TradeAsset.league_id == league_id,
+            TradeProposal.status == "approved",
+        )
+        .order_by(TradeProposal.decided_at, TradeProposal.id, TradeAsset.id)
+    ).all()
+    for asset, _trade in approved_assets:
+        existing = ownership.get(asset.player_id)
+        if existing is not None and existing[0] == asset.from_user_id:
+            ownership[asset.player_id] = (asset.to_user_id, asset.player_name)
+    return ownership
+
+
+def create_trade(
+    session: Session,
+    league_id: str,
+    principal: Principal,
+    *,
+    counterparty_user_id: str,
+    offered_player_ids: list[str],
+    requested_player_ids: list[str],
+    now: datetime | None = None,
+) -> TradeProposal:
+    proposer = require_active_member(session, league_id, principal)
+    counterparty = session.scalar(
+        select(LeagueMember).where(
+            LeagueMember.league_id == league_id,
+            LeagueMember.user_id == counterparty_user_id,
+            LeagueMember.status == "active",
+        )
+    )
+    if counterparty is None or counterparty.user_id == proposer.user_id:
+        raise DomainError("Choose another active manager.", 422, "trade_counterparty_invalid")
+    offered = list(dict.fromkeys(player_id.strip() for player_id in offered_player_ids))
+    requested = list(dict.fromkeys(player_id.strip() for player_id in requested_player_ids))
+    if not offered or not requested or set(offered) & set(requested):
+        raise DomainError("A trade needs distinct players from both managers.", 422, "trade_assets_invalid")
+    roster = current_roster(session, league_id)
+    for player_id in offered:
+        if roster.get(player_id, (None, ""))[0] != proposer.user_id:
+            raise DomainError("You can only offer players you currently own.", 409, "trade_ownership_changed")
+    for player_id in requested:
+        if roster.get(player_id, (None, ""))[0] != counterparty.user_id:
+            raise DomainError("Requested players must belong to the other manager.", 409, "trade_ownership_changed")
+
+    created_at = now or utc_now()
+    trade = TradeProposal(
+        league_id=league_id,
+        proposer_user_id=proposer.user_id,
+        counterparty_user_id=counterparty.user_id,
+        status="proposed",
+        created_at=created_at,
+        expires_at=created_at + timedelta(hours=36),
+    )
+    session.add(trade)
+    session.flush()
+    for player_id in offered:
+        session.add(TradeAsset(
+            trade_id=trade.id, league_id=league_id,
+            from_user_id=proposer.user_id, to_user_id=counterparty.user_id,
+            player_id=player_id, player_name=roster[player_id][1],
+        ))
+    for player_id in requested:
+        session.add(TradeAsset(
+            trade_id=trade.id, league_id=league_id,
+            from_user_id=counterparty.user_id, to_user_id=proposer.user_id,
+            player_id=player_id, player_name=roster[player_id][1],
+        ))
+    session.add(AuditEvent(
+        league_id=league_id, actor_user_id=proposer.user_id,
+        subject_user_id=counterparty.user_id, event_type="trade.proposed",
+        detail=f"Trade {trade.id} proposed with a 36-hour commissioner boundary.",
+    ))
+    session.flush()
+    return trade
+
+
+def _locked_trade(session: Session, league_id: str, trade_id: str) -> TradeProposal:
+    trade = session.scalar(
+        select(TradeProposal).where(
+            TradeProposal.id == trade_id,
+            TradeProposal.league_id == league_id,
+        ).with_for_update()
+    )
+    if trade is None:
+        raise DomainError("Trade not found.", 404, "trade_not_found")
+    return trade
+
+
+def accept_trade(
+    session: Session, league_id: str, trade_id: str, principal: Principal,
+    *, now: datetime | None = None,
+) -> TradeProposal:
+    member = require_active_member(session, league_id, principal)
+    trade = _locked_trade(session, league_id, trade_id)
+    accepted_at = now or utc_now()
+    if trade.counterparty_user_id != member.user_id:
+        raise DomainError("Only the receiving manager can accept this trade.", 403, "trade_recipient_required")
+    if trade.status != "proposed":
+        raise DomainError("This trade is no longer awaiting acceptance.", 409, "trade_state_conflict")
+    if accepted_at >= _aware_utc(trade.expires_at):
+        trade.status = "expired"
+        raise DomainError("The 36-hour trade window expired.", 409, "trade_expired")
+    trade.status = "accepted"
+    trade.responded_at = accepted_at
+    session.add(AuditEvent(
+        league_id=league_id, actor_user_id=member.user_id,
+        subject_user_id=trade.proposer_user_id, event_type="trade.accepted",
+        detail=f"Trade {trade.id} accepted and sent to the commissioner.",
+    ))
+    return trade
+
+
+def approve_trade(
+    session: Session, league_id: str, trade_id: str, principal: Principal,
+    *, now: datetime | None = None,
+) -> TradeProposal:
+    _league, commissioner = require_commissioner(session, league_id, principal)
+    trade = _locked_trade(session, league_id, trade_id)
+    decided_at = now or utc_now()
+    if trade.status != "accepted":
+        raise DomainError("Only an accepted trade can be approved.", 409, "trade_state_conflict")
+    if decided_at >= _aware_utc(trade.expires_at):
+        trade.status = "expired"
+        raise DomainError("The 36-hour trade window expired.", 409, "trade_expired")
+    roster = current_roster(session, league_id)
+    assets = list(session.scalars(select(TradeAsset).where(TradeAsset.trade_id == trade.id)))
+    if any(roster.get(asset.player_id, (None, ""))[0] != asset.from_user_id for asset in assets):
+        trade.status = "rejected"
+        trade.decided_at = decided_at
+        trade.decided_by_user_id = commissioner.id
+        raise DomainError("Player ownership changed before approval.", 409, "trade_ownership_changed")
+    trade.status = "approved"
+    trade.decided_at = decided_at
+    trade.decided_by_user_id = commissioner.id
+    session.add(AuditEvent(
+        league_id=league_id, actor_user_id=commissioner.id,
+        subject_user_id=trade.proposer_user_id, event_type="trade.approved",
+        detail=f"Trade {trade.id} approved; {len(assets)} player ownership events applied.",
+    ))
+    return trade
+
+
+NEW_YORK = ZoneInfo("America/New_York")
+
+
+def next_faab_process_at(now: datetime) -> datetime:
+    if now.tzinfo is None:
+        raise ValueError("now must include a timezone")
+    local_now = now.astimezone(NEW_YORK)
+    local_process = local_now.replace(hour=17, minute=0, second=0, microsecond=0)
+    if local_now >= local_process:
+        local_process += timedelta(days=1)
+    return local_process.astimezone(timezone.utc)
+
+
+def _aware_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
+def create_faab_window(
+    session: Session,
+    league_id: str,
+    principal: Principal,
+    *,
+    player_id: str,
+    player_name: str,
+    now: datetime | None = None,
+) -> FaabWindow:
+    league, commissioner = require_commissioner(session, league_id, principal)
+    accepted_at = now or utc_now()
+    existing = session.scalar(
+        select(FaabWindow).where(
+            FaabWindow.league_id == league.id,
+            FaabWindow.player_id == player_id.strip(),
+            FaabWindow.status == "open",
+        )
+    )
+    if existing is not None:
+        return existing
+    window = FaabWindow(
+        league_id=league.id,
+        player_id=player_id.strip(),
+        player_name=player_name.strip(),
+        process_at=next_faab_process_at(accepted_at),
+        created_by_user_id=commissioner.id,
+        created_at=accepted_at,
+    )
+    session.add(window)
+    session.flush()
+    session.add(
+        AuditEvent(
+            league_id=league.id,
+            actor_user_id=commissioner.id,
+            event_type="faab.window_opened",
+            detail=f"Blind claim window opened for {window.player_name}; processing is scheduled for 5 PM New York.",
+        )
+    )
+    return window
+
+
+def submit_faab_bid(
+    session: Session,
+    league_id: str,
+    window_id: str,
+    principal: Principal,
+    *,
+    amount: int,
+    client_command_id: str,
+    now: datetime | None = None,
+) -> tuple[FaabBid, LeagueMember]:
+    membership = require_active_member(session, league_id, principal)
+    accepted_at = now or utc_now()
+    window = session.scalar(
+        select(FaabWindow)
+        .where(FaabWindow.id == window_id, FaabWindow.league_id == league_id)
+        .with_for_update()
+    )
+    if window is None:
+        raise DomainError("FAAB window not found.", 404, "faab_window_not_found")
+    normalized_command_id = client_command_id.strip()
+    previous_command = session.scalar(
+        select(FaabBid).where(
+            FaabBid.window_id == window.id,
+            FaabBid.client_command_id == normalized_command_id,
+        )
+    )
+    if previous_command is not None:
+        if previous_command.user_id == membership.user_id and previous_command.amount == amount:
+            return previous_command, membership
+        raise DomainError(
+            "That command ID was already used for a different bid.",
+            409,
+            "faab_command_conflict",
+        )
+    if window.status != "open" or accepted_at >= _aware_utc(window.process_at):
+        raise DomainError("This FAAB window is closed.", 409, "faab_window_closed")
+    if amount < 0 or amount > membership.faab_balance:
+        raise DomainError("Bid exceeds the available FAAB balance.", 409, "faab_balance_exceeded")
+    existing = session.scalar(
+        select(FaabBid).where(
+            FaabBid.window_id == window.id,
+            FaabBid.user_id == membership.user_id,
+        )
+    )
+    if existing is None:
+        bid = FaabBid(
+            window_id=window.id,
+            league_id=league_id,
+            user_id=membership.user_id,
+            amount=amount,
+            waiver_priority_snapshot=membership.waiver_priority,
+            client_command_id=normalized_command_id,
+            priority_key="pending",
+            accepted_at=accepted_at,
+        )
+        session.add(bid)
+        session.flush()
+    else:
+        bid = existing
+        bid.amount = amount
+        bid.waiver_priority_snapshot = membership.waiver_priority
+        bid.client_command_id = normalized_command_id
+        bid.accepted_at = accepted_at
+    timestamp_key = int(_aware_utc(accepted_at).timestamp() * 1_000_000)
+    bid.priority_key = f"{membership.waiver_priority:04d}:{timestamp_key:020d}:{bid.id}"
+    session.add(
+        AuditEvent(
+            league_id=league_id,
+            actor_user_id=membership.user_id,
+            event_type="faab.bid_saved",
+            detail=f"Blind bid saved for window {window.id}; amount remains private until processing.",
+        )
+    )
+    session.flush()
+    return bid, membership
+
+
+def process_faab_window(
+    session: Session,
+    league_id: str,
+    window_id: str,
+    principal: Principal,
+    *,
+    now: datetime | None = None,
+) -> tuple[FaabWindow, FaabAward | None]:
+    league, commissioner = require_commissioner(session, league_id, principal)
+    processed_at = now or utc_now()
+    window = session.scalar(
+        select(FaabWindow)
+        .where(FaabWindow.id == window_id, FaabWindow.league_id == league.id)
+        .with_for_update()
+    )
+    if window is None:
+        raise DomainError("FAAB window not found.", 404, "faab_window_not_found")
+    existing_award = session.scalar(
+        select(FaabAward).where(FaabAward.window_id == window.id)
+    )
+    if window.status == "processed":
+        return window, existing_award
+    if processed_at < _aware_utc(window.process_at):
+        raise DomainError(
+            "FAAB processing begins at 5 PM New York.",
+            409,
+            "faab_processing_early",
+        )
+    ranked_bids = list(
+        session.scalars(
+            select(FaabBid)
+            .join(
+                LeagueMember,
+                (LeagueMember.league_id == FaabBid.league_id)
+                & (LeagueMember.user_id == FaabBid.user_id),
+            )
+            .where(
+                FaabBid.window_id == window.id,
+                LeagueMember.status == "active",
+                LeagueMember.faab_balance >= FaabBid.amount,
+            )
+            .order_by(
+                FaabBid.amount.desc(),
+                FaabBid.waiver_priority_snapshot,
+                FaabBid.accepted_at,
+                FaabBid.id,
+            )
+        )
+    )
+    award = None
+    if ranked_bids:
+        winner = ranked_bids[0]
+        winner_membership = session.scalar(
+            select(LeagueMember)
+            .where(
+                LeagueMember.league_id == league.id,
+                LeagueMember.user_id == winner.user_id,
+            )
+            .with_for_update()
+        )
+        if winner_membership is None:
+            raise DomainError("Winning membership not found.", 409, "faab_member_missing")
+        winner_membership.faab_balance -= winner.amount
+        old_priority = winner_membership.waiver_priority
+        active_members = list(
+            session.scalars(
+                select(LeagueMember).where(
+                    LeagueMember.league_id == league.id,
+                    LeagueMember.status == "active",
+                )
+            )
+        )
+        for member in active_members:
+            if member.user_id == winner.user_id:
+                member.waiver_priority = len(active_members)
+            elif member.waiver_priority > old_priority:
+                member.waiver_priority -= 1
+        award = FaabAward(
+            window_id=window.id,
+            league_id=league.id,
+            winning_bid_id=winner.id,
+            winner_user_id=winner.user_id,
+            amount=winner.amount,
+            processed_at=processed_at,
+        )
+        session.add(award)
+        session.add(
+            AuditEvent(
+                league_id=league.id,
+                actor_user_id=commissioner.id,
+                subject_user_id=winner.user_id,
+                event_type="faab.player_awarded",
+                detail=f"{window.player_name} awarded for {winner.amount} FAAB.",
+            )
+        )
+    else:
+        session.add(
+            AuditEvent(
+                league_id=league.id,
+                actor_user_id=commissioner.id,
+                event_type="faab.window_closed_empty",
+                detail=f"No eligible bid for {window.player_name}.",
+            )
+        )
+    window.status = "processed"
+    window.processed_at = processed_at
+    session.flush()
+    return window, award
+
+
+def process_due_faab_windows(
+    session: Session,
+    league_id: str,
+    principal: Principal,
+    *,
+    now: datetime | None = None,
+) -> list[tuple[FaabWindow, FaabAward | None]]:
+    """Resolve every due open window in a stable order through the same award path."""
+    require_commissioner(session, league_id, principal)
+    processed_at = now or utc_now()
+    candidate_ids = [
+        window.id
+        for window in session.scalars(
+            select(FaabWindow)
+            .where(FaabWindow.league_id == league_id, FaabWindow.status == "open")
+            .order_by(FaabWindow.process_at, FaabWindow.id)
+        )
+        if _aware_utc(window.process_at) <= _aware_utc(processed_at)
+    ]
+    return [
+        process_faab_window(
+            session,
+            league_id,
+            window_id,
+            principal,
+            now=processed_at,
+        )
+        for window_id in candidate_ids
+    ]

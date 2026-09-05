@@ -127,6 +127,51 @@ def test_public_demo_needs_no_login_but_private_routes_do(client: TestClient) ->
     assert client.post("/v1/leagues", json={"name": "Private League"}).status_code == 401
 
 
+def test_viewer_identity_is_stable_and_matches_league_membership(client: TestClient) -> None:
+    headers = auth_headers(0, "Marco")
+    first = client.get("/v1/me", headers=headers)
+    second = client.get("/v1/me", headers=headers)
+    league = client.post("/v1/leagues", json={"name": "Identity XI"}, headers=headers)
+
+    assert first.status_code == second.status_code == 200
+    assert first.json() == second.json()
+    assert first.json()["display_name"] == "Marco"
+    assert league.json()["members"][0]["user_id"] == first.json()["id"]
+
+
+def test_lists_only_the_authenticated_users_active_leagues(client: TestClient) -> None:
+    first = client.post(
+        "/v1/leagues", json={"name": "Wirtz First XI"}, headers=auth_headers(0, "Marco")
+    ).json()
+    second = client.post(
+        "/v1/leagues", json={"name": "Pressing Lab"}, headers=auth_headers(1, "Amina")
+    ).json()
+    client.post(
+        "/v1/leagues/join",
+        json={"invite_code": second["invite_code"]},
+        headers=auth_headers(0, "Marco"),
+    )
+
+    response = client.get("/v1/leagues", headers=auth_headers(0, "Marco"))
+
+    assert response.status_code == 200
+    assert {league["id"] for league in response.json()} == {first["id"], second["id"]}
+
+
+def test_local_frontend_origin_can_preflight_authenticated_requests(client: TestClient) -> None:
+    response = client.options(
+        "/v1/leagues",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "x-user-id,x-user-name",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+
+
 def test_private_league_and_audit_require_active_membership(client: TestClient) -> None:
     league = create_league(client)
     outsider = auth_headers(42)
@@ -153,10 +198,16 @@ def test_snake_draft_advances_and_reverses_in_round_two(client: TestClient) -> N
     seats = started.json()["seat_order"]
     assert started.json()["seconds_per_pick"] == 45
 
-    for user_number, player in ((0, "Wirtz"), (1, "Salah"), (2, "Alisson")):
+    for command_number, (user_number, player) in enumerate(
+        ((0, "Wirtz"), (1, "Salah"), (2, "Alisson")), start=1
+    ):
         picked = client.post(
             f"/v1/leagues/{league['id']}/draft/picks",
-            json={"player_id": player.lower(), "player_name": player},
+            json={
+                "client_command_id": f"draft-command-{command_number}",
+                "player_id": player.lower(),
+                "player_name": player,
+            },
             headers=auth_headers(user_number, "Marco" if user_number == 0 else None),
         )
         assert picked.status_code == 200
@@ -179,7 +230,7 @@ def test_snake_draft_rejects_wrong_turn_and_duplicate_player(client: TestClient)
 
     wrong_turn = client.post(
         f"/v1/leagues/{league['id']}/draft/picks",
-        json={"player_id": "wirtz", "player_name": "Florian Wirtz"},
+        json={"client_command_id": "wrong-turn-001", "player_id": "wirtz", "player_name": "Florian Wirtz"},
         headers=auth_headers(1),
     )
     assert wrong_turn.status_code == 409
@@ -187,14 +238,103 @@ def test_snake_draft_rejects_wrong_turn_and_duplicate_player(client: TestClient)
 
     first = client.post(
         f"/v1/leagues/{league['id']}/draft/picks",
-        json={"player_id": "wirtz", "player_name": "Florian Wirtz"},
+        json={"client_command_id": "first-pick-001", "player_id": "wirtz", "player_name": "Florian Wirtz"},
         headers=auth_headers(0, "Marco"),
     )
     assert first.status_code == 200
     duplicate = client.post(
         f"/v1/leagues/{league['id']}/draft/picks",
-        json={"player_id": "wirtz", "player_name": "Florian Wirtz"},
+        json={"client_command_id": "duplicate-player-001", "player_id": "wirtz", "player_name": "Florian Wirtz"},
         headers=auth_headers(1),
     )
     assert duplicate.status_code == 409
     assert duplicate.json()["code"] == "player_unavailable"
+
+
+def test_snake_draft_retry_does_not_create_a_second_pick_or_advance_turn(
+    client: TestClient,
+) -> None:
+    league = create_league(client)
+    client.post(
+        "/v1/leagues/join",
+        json={"invite_code": league["invite_code"]},
+        headers=auth_headers(1),
+    )
+    client.post(
+        f"/v1/leagues/{league['id']}/draft/start",
+        headers=auth_headers(0, "Marco"),
+    )
+    request = {
+        "client_command_id": "draft-click-001",
+        "player_id": "wirtz",
+        "player_name": "Florian Wirtz",
+    }
+
+    first = client.post(
+        f"/v1/leagues/{league['id']}/draft/picks",
+        json=request,
+        headers=auth_headers(0, "Marco"),
+    )
+    retry = client.post(
+        f"/v1/leagues/{league['id']}/draft/picks",
+        json=request,
+        headers=auth_headers(0, "Marco"),
+    )
+
+    assert first.status_code == retry.status_code == 200
+    assert retry.json()["current_pick"] == 2
+    assert [pick["player_id"] for pick in retry.json()["picks"]] == ["wirtz"]
+    audit = client.get(
+        f"/v1/leagues/{league['id']}/audit", headers=auth_headers(0, "Marco")
+    ).json()
+    assert sum(event["event_type"] == "draft.pick_made" for event in audit) == 1
+
+
+def test_draft_command_id_survives_later_picks_and_rejects_payload_changes(
+    client: TestClient,
+) -> None:
+    league = create_league(client)
+    client.post(
+        "/v1/leagues/join",
+        json={"invite_code": league["invite_code"]},
+        headers=auth_headers(1),
+    )
+    client.post(
+        f"/v1/leagues/{league['id']}/draft/start",
+        headers=auth_headers(0, "Marco"),
+    )
+    first_request = {
+        "client_command_id": "persistent-command-001",
+        "player_id": "wirtz",
+        "player_name": "Florian Wirtz",
+    }
+    assert client.post(
+        f"/v1/leagues/{league['id']}/draft/picks",
+        json=first_request,
+        headers=auth_headers(0, "Marco"),
+    ).status_code == 200
+    assert client.post(
+        f"/v1/leagues/{league['id']}/draft/picks",
+        json={
+            "client_command_id": "second-manager-command-001",
+            "player_id": "salah",
+            "player_name": "Mohamed Salah",
+        },
+        headers=auth_headers(1),
+    ).status_code == 200
+
+    late_retry = client.post(
+        f"/v1/leagues/{league['id']}/draft/picks",
+        json=first_request,
+        headers=auth_headers(0, "Marco"),
+    )
+    changed_payload = client.post(
+        f"/v1/leagues/{league['id']}/draft/picks",
+        json={**first_request, "player_id": "alisson", "player_name": "Alisson"},
+        headers=auth_headers(0, "Marco"),
+    )
+
+    assert late_retry.status_code == 200
+    assert late_retry.json()["current_pick"] == 3
+    assert changed_payload.status_code == 409
+    assert changed_payload.json()["code"] == "draft_command_conflict"

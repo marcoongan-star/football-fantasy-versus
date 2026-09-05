@@ -2,7 +2,7 @@
 
 A configurable fantasy-football platform that combines transparent real-performance scoring with a separate, reproducible career simulation.
 
-> Status: the public recruiter demo, league and draft foundations, and replayable Career Mode match engine are working and tested.
+> Status: the public recruiter preview and persistent local league onboarding are working and tested. Production sign-in and API deployment remain before the private beta is public.
 
 ## Why FFV exists
 
@@ -91,6 +91,11 @@ docs/       Product decisions, data flows, and milestone explanations
 - Interactive, resettable public draft preview that makes the snake-order reversal visible without requiring login.
 - Formation-aware Career Mode simulation with tactics, fatigue, expected goals, home advantage, and seeded replay.
 - Interactive public Career head-to-head preview with formation and mentality controls.
+- Manager-owned weekly Career tactics with authenticated, retry-safe database updates.
+- Server-authoritative private draft workspace with snake-order reversal, a 45-second presentation clock, accepted-pick cursor, and reconnect-safe state replacement.
+- Persistent create/join/switch league onboarding through the typed API, including reusable commissioner invites and a valid pre-draft state.
+- Persistent browser draft picks with authenticated turn gating and retry-safe command identity.
+- Persistent blind-FAAB browser commands with commissioner-created claims, personal bid visibility, balance checks, and retry-safe updates.
 - Immutable official Career match snapshots that preserve lineups, ratings, fatigue, model version, seed, xG, and result.
 - Separate Career standings with 3/1/0 points, goal difference, goals scored, and head-to-head tiebreaking.
 - Reproducible Career table snapshots as of any completed gameweek.
@@ -104,6 +109,8 @@ The public page is intentionally concentrated in a few files so a new contributo
 | What you want to change | File |
 | --- | --- |
 | Public page words, seeded players, managers, and demo content | `frontend/app/league-demo.tsx` |
+| Private league workspace and career table | `frontend/app/app/ffv-app.tsx` |
+| Typed API/fallback boundary for that workspace | `frontend/app/app/ffv-api.ts` |
 | Colors, spacing, and responsive layout | `frontend/app/globals.css` |
 | Browser title and social sharing metadata | `frontend/app/layout.tsx` |
 | League and draft API routes | `backend/app/main.py` |
@@ -131,22 +138,26 @@ pnpm install
 pnpm dev
 ```
 
-Then open `http://localhost:3000`. API documentation is at `http://localhost:8000/docs`.
+Then open `http://localhost:3000` for the recruiter story, `http://localhost:3000/app` for the career workspace, or `http://localhost:3000/app/draft` for the direct draft-room view. API documentation is at `http://localhost:8000/docs`.
+
+To use real persistent leagues rather than the seeded preview, copy `frontend/.env.example` to `frontend/.env.local` before starting the frontend. The example points to the local FastAPI service and uses development-only identity headers. Open `/app`, create a league, and share its returned invite. Production mode refuses those headers.
 
 Run checks with `pytest` inside `backend`, then `pnpm lint`, `pnpm build`, and the Node tests inside `frontend`.
 
-See [Milestone 2](docs/milestone-2.md) for leagues and membership, [Milestone 3](docs/milestone-3.md) for the snake-draft state machine, [Milestone 4](docs/milestone-4.md) for its public interactive preview, [Milestone 5](docs/milestone-5.md) for Career Mode simulation, [Milestone 6](docs/milestone-6.md) for the public head-to-head slice, [Milestone 7](docs/milestone-7.md) for immutable league history, and [Milestone 8](docs/milestone-8.md) for derived standings and corrections.
+See [Milestone 2](docs/milestone-2.md) for leagues and membership, [Milestone 3](docs/milestone-3.md) for the snake-draft state machine, [Milestone 4](docs/milestone-4.md) for its public interactive preview, [Milestone 5](docs/milestone-5.md) for Career Mode simulation, [Milestone 6](docs/milestone-6.md) for the public head-to-head slice, [Milestone 7](docs/milestone-7.md) for immutable league history, [Milestone 8](docs/milestone-8.md) for derived standings and corrections, [Milestone 9](docs/milestone-9.md) for the reconnectable private draft workspace, [Milestone 10](docs/milestone-10.md) for natural-key retry safety, [Milestone 11](docs/milestone-11.md) for durable client command identity, [Milestone 12](docs/milestone-12.md) for private FAAB bidding and deterministic awards, [Milestone 13](docs/milestone-13.md) for the first persistent league onboarding flow, [Milestone 14](docs/milestone-14.md) for the first real browser draft command, [Milestone 15](docs/milestone-15.md) for the persistent blind-FAAB browser flow, [Milestone 16](docs/milestone-16.md) for commissioner-controlled due-window resolution, [Milestone 17](docs/milestone-17.md) for auditable 36-hour trades, and [Milestone 18](docs/milestone-18.md) for the browser trade command surface.
 
 ## Core invariants
 
 1. A player cannot be owned twice in the same league.
 2. A valid draft pick advances the turn exactly once.
-3. FAAB balances cannot become negative.
-4. A trade conserves the set of owned players.
-5. Published scoring-rule versions are immutable.
-6. Replaying a simulation with identical inputs and seed produces the same result.
-7. Career table points equal three per win plus one per draw.
-8. Reprocessing the same provider update cannot duplicate performances or points.
+3. Retrying the immediately previous accepted pick cannot advance the turn twice.
+4. FAAB balances cannot become negative.
+5. No FAAB award can end with an unresolved equal bid; hidden priority resolves equal displayed amounts without exposing another manager's bid.
+6. A trade conserves the set of owned players.
+7. Published scoring-rule versions are immutable.
+8. Replaying a simulation with identical inputs and seed produces the same result.
+9. Career table points equal three per win plus one per draw.
+10. Reprocessing the same provider update cannot duplicate performances or points.
 
 ## Free public deployment target
 
@@ -166,11 +177,11 @@ Free-tier limits are treated as system constraints: the demo will retain provena
 3. Add transactionally safe snake drafting. **Complete**
 4. Add small-league auction drafting and blind FAAB.
 5. Version scoring rules and calculate Wirtz Ratings.
-6. Add commissioner-reviewed trades and expiration.
+6. Add commissioner-reviewed trades and expiration. **Complete (API, ownership projection, and browser workflow)**
 7. Simulate Career Mode fixtures with tactics and fatigue.
-8. Stream draft and fixture updates with reconnect fallback.
-9. Test concurrency, scoring, and simulation invariants.
-10. Deploy a free public demonstration.
+8. Connect verified production sign-in and hosted PostgreSQL.
+9. Wire remaining commissioner controls to authenticated browser commands; draft picks and blind FAAB bidding are complete.
+10. Stream draft and fixture updates with reconnect fallback and deploy the private beta.
 11. Publish architecture decisions and interview preparation.
 
 Every milestone must be working, tested, understood, and pushed separately. Commits will not be backdated.
