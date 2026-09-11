@@ -10,6 +10,7 @@ import {
   isApiConfigured,
   joinLeague,
   listMyLeagues,
+  loadLeagueAudit,
   loadFaabBoard,
   loadLeagueWorkspace,
   loadRosters,
@@ -17,10 +18,15 @@ import {
   openFaabWindow,
   processDueFaabWindows,
   proposeTrade,
+  removeLeagueMember,
+  restoreLeagueMember,
+  revokeLeagueInvite,
+  rotateLeagueInvite,
   saveFaabBid,
   saveCareerTactics,
   startDraft,
   submitDraftPick,
+  type AuditEvent,
   type DraftState,
   type FaabBoard,
   type FaabWindowRecord,
@@ -106,6 +112,11 @@ export function FfvApp({ initialView = "career" }: { initialView?: AppView }) {
     setNewInvite("invite_code" in league ? league.invite_code : "");
     setAccessError("");
     setView("league");
+  }
+
+  function updateCurrentLeague(league: LeagueRecord) {
+    setWorkspace((current) => ({ ...current, league, leagueName: league.name }));
+    setLeagues((current) => current.map((item) => item.id === league.id ? league : item));
   }
 
   const visibleMatches = useMemo(() => {
@@ -213,12 +224,121 @@ export function FfvApp({ initialView = "career" }: { initialView?: AppView }) {
           </>
         )}
 
-        {hasSelectedLeague && view === "league" && <>{apiConfigured && <LeagueAccessPanel onAccepted={acceptLeague} error={accessError} newInvite={newInvite} />}<FaabWorkspace connection={connection} league={workspace.league} viewer={workspace.viewer} board={workspace.faab} onBoardUpdated={(faab) => setWorkspace((current) => ({ ...current, faab }))} /></>}
+        {hasSelectedLeague && view === "league" && <>{apiConfigured && <LeagueAccessPanel onAccepted={acceptLeague} error={accessError} newInvite={newInvite} />}<CommissionerWorkspace key={`${connection}-${workspace.league.id}`} connection={connection} league={workspace.league} viewer={workspace.viewer} onLeagueUpdated={updateCurrentLeague} /><FaabWorkspace connection={connection} league={workspace.league} viewer={workspace.viewer} board={workspace.faab} onBoardUpdated={(faab) => setWorkspace((current) => ({ ...current, faab }))} /></>}
         {hasSelectedLeague && view === "draft" && <DraftWorkspace key={`${workspace.source}-${workspace.draft?.current_pick ?? "pending"}`} draft={workspace.draft} connection={connection} leagueId={workspace.league.id} viewer={workspace.viewer} managerNames={displayNames} onDraftUpdated={(draft) => setWorkspace((current) => ({ ...current, draft }))} />}
         {hasSelectedLeague && view === "trades" && <TradeWorkspace connection={connection} league={workspace.league} viewer={workspace.viewer} managerNames={displayNames} />}
       </section>
     </main>
   );
+}
+
+const seededAudit: AuditEvent[] = [
+  { id: "audit-3", event_type: "invite.rotated", actor_user_id: "marco", subject_user_id: null, detail: "Commissioner issued invite version 1.", created_at: "2026-08-13T17:20:00Z" },
+  { id: "audit-2", event_type: "member.joined", actor_user_id: "rosa", subject_user_id: "rosa", detail: "Rosa joined with a reusable invite.", created_at: "2026-08-13T17:15:00Z" },
+  { id: "audit-1", event_type: "league.created", actor_user_id: "marco", subject_user_id: null, detail: "The Gegenpress Society was created.", created_at: "2026-08-13T17:00:00Z" },
+];
+
+function CommissionerWorkspace({ connection, league, viewer, onLeagueUpdated }: { connection: Connection; league: LeagueRecord; viewer: LeagueWorkspace["viewer"]; onLeagueUpdated: (league: LeagueRecord) => void }) {
+  const isCommissioner = viewer.id === league.commissioner_user_id;
+  const [audit, setAudit] = useState<AuditEvent[]>(connection === "demo" ? seededAudit : []);
+  const [inviteCode, setInviteCode] = useState("");
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    if (connection !== "api") return;
+    const controller = new AbortController();
+    loadLeagueAudit(league.id, controller.signal).then(setAudit).catch(() => setMessage("Audit history could not be loaded."));
+    return () => controller.abort();
+  }, [connection, league.id]);
+
+  function demoEvent(eventType: string, detail: string, subjectUserId: string | null = null) {
+    setAudit((current) => [{
+      id: crypto.randomUUID(),
+      event_type: eventType,
+      actor_user_id: viewer.id,
+      subject_user_id: subjectUserId,
+      detail,
+      created_at: new Date().toISOString(),
+    }, ...current]);
+  }
+
+  async function changeInvite(action: "rotate" | "revoke") {
+    setBusy(action);
+    setMessage("");
+    try {
+      if (connection === "api") {
+        if (action === "rotate") {
+          const rotated = await rotateLeagueInvite(league.id);
+          setInviteCode(rotated.invite_code);
+          onLeagueUpdated({ ...league, invite_enabled: true, invite_version: rotated.invite_version });
+        } else {
+          onLeagueUpdated(await revokeLeagueInvite(league.id));
+          setInviteCode("");
+        }
+        setAudit(await loadLeagueAudit(league.id));
+      } else if (action === "rotate") {
+        const version = league.invite_version + 1;
+        setInviteCode(`FFV-DEMO-V${version}`);
+        onLeagueUpdated({ ...league, invite_enabled: true, invite_version: version });
+        demoEvent("invite.rotated", `Seeded preview moved to invite version ${version}.`);
+      } else {
+        setInviteCode("");
+        onLeagueUpdated({ ...league, invite_enabled: false });
+        demoEvent("invite.revoked", "Seeded preview disabled new joins.");
+      }
+      setMessage(action === "rotate" ? "A new reusable invite is ready." : "New joins are now blocked.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Commissioner command failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function changeMember(member: LeagueRecord["members"][number]) {
+    const action = member.status === "active" ? "remove" : "restore";
+    setBusy(member.user_id);
+    setMessage("");
+    try {
+      if (connection === "api") {
+        const next = action === "remove"
+          ? await removeLeagueMember(league.id, member.user_id)
+          : await restoreLeagueMember(league.id, member.user_id);
+        onLeagueUpdated(next);
+        setAudit(await loadLeagueAudit(league.id));
+      } else {
+        const now = new Date().toISOString();
+        const members = league.members.map((item) => item.user_id === member.user_id ? {
+          ...item,
+          status: action === "remove" ? "removed" as const : "active" as const,
+          removed_at: action === "remove" ? now : null,
+        } : item);
+        onLeagueUpdated({ ...league, members, active_member_count: members.filter((item) => item.status === "active").length });
+        demoEvent(`member.${action === "remove" ? "removed" : "restored"}`, `${member.display_name} was ${action === "remove" ? "removed" : "restored"} in the seeded preview.`, member.user_id);
+      }
+      setMessage(`${member.display_name} was ${action === "remove" ? "removed without deleting history" : "restored"}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Member command failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  if (!isCommissioner) return <article className="workspace-panel commissioner-readonly"><small>COMMISSIONER CONTROLS</small><h2>Managed by {league.members.find((member) => member.user_id === league.commissioner_user_id)?.display_name ?? "the commissioner"}</h2><p>You can inspect league state, but invite and membership commands are commissioner-only.</p></article>;
+
+  return <section className="commissioner-grid">
+    <article className="workspace-panel commissioner-panel">
+      <div className="panel-title"><div><small>COMMISSIONER CONTROL ROOM</small><h2>League access</h2></div><span className={league.invite_enabled ? "locked-pill" : "invite-off"}>{league.invite_enabled ? `Invite v${league.invite_version} active` : "Joins blocked"}</span></div>
+      <div className="commissioner-actions"><button disabled={Boolean(busy)} onClick={() => void changeInvite("rotate")}>{busy === "rotate" ? "Rotating…" : "Rotate invite"}</button><button className="danger" disabled={Boolean(busy) || !league.invite_enabled} onClick={() => void changeInvite("revoke")}>{busy === "revoke" ? "Revoking…" : "Revoke invite"}</button></div>
+      {inviteCode && <div className="invite-result"><small>NEW REUSABLE INVITE</small><strong>{inviteCode}</strong><span>The previous code stopped working in the same transaction.</span></div>}
+      <div className="member-admin">{league.members.map((member) => <div key={member.user_id}><span><strong>{member.display_name}</strong><small>{member.role} · {member.status}</small></span>{member.role !== "commissioner" && <button disabled={Boolean(busy)} onClick={() => void changeMember(member)}>{busy === member.user_id ? "Saving…" : member.status === "active" ? "Remove" : "Restore"}</button>}</div>)}</div>
+      {message && <p className="commissioner-message" role="status">{message}</p>}
+    </article>
+    <article className="workspace-panel audit-panel">
+      <div className="panel-title"><div><small>APPEND-ONLY ACCOUNTABILITY</small><h2>Audit history</h2></div><span>{audit.length} events</span></div>
+      <ol>{audit.slice(0, 8).map((event) => <li key={event.id}><div><strong>{event.event_type.replaceAll(".", " ")}</strong><time dateTime={event.created_at}>{new Date(event.created_at).toLocaleString()}</time></div><p>{event.detail}</p></li>)}</ol>
+    </article>
+  </section>;
 }
 
 function LeagueAccessPanel({ onAccepted, error, newInvite = "" }: { onAccepted: (league: LeagueRecord | LeagueCreated) => void; error: string; newInvite?: string }) {

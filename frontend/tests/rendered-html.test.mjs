@@ -75,6 +75,10 @@ test("server-renders the blind FAAB workspace without exposing bids", async () =
   assert.match(html, /5:00 PM/);
   assert.match(html, /Other bids hidden/i);
   assert.match(html, /Equal amounts use hidden waiver priority/i);
+  assert.match(html, /COMMISSIONER CONTROL ROOM/i);
+  assert.match(html, /Rotate invite/i);
+  assert.match(html, /APPEND-ONLY ACCOUNTABILITY/i);
+  assert.match(html, /Remove/i);
   assert.doesNotMatch(html, /Manager 1 bid|Manager 2 bid/i);
 });
 
