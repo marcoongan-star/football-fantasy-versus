@@ -92,6 +92,7 @@ docs/       Product decisions, data flows, and milestone explanations
 - Formation-aware Career Mode simulation with tactics, fatigue, expected goals, home advantage, and seeded replay.
 - Interactive public Career head-to-head preview with formation and mentality controls.
 - Manager-owned weekly Career tactics with authenticated, retry-safe database updates.
+- An interactive commissioner control room for invite rotation/revocation, soft member removal/restoration, and append-only audit history.
 - Server-authoritative private draft workspace with snake-order reversal, a 45-second presentation clock, accepted-pick cursor, and reconnect-safe state replacement.
 - Persistent create/join/switch league onboarding through the typed API, including reusable commissioner invites and a valid pre-draft state.
 - Persistent browser draft picks with authenticated turn gating and retry-safe command identity.
@@ -180,7 +181,7 @@ Free-tier limits are treated as system constraints: the demo will retain provena
 6. Add commissioner-reviewed trades and expiration. **Complete (API, ownership projection, and browser workflow)**
 7. Simulate Career Mode fixtures with tactics and fatigue.
 8. Connect verified production sign-in and hosted PostgreSQL.
-9. Wire remaining commissioner controls to authenticated browser commands; draft picks and blind FAAB bidding are complete.
+9. Wire remaining commissioner controls to authenticated browser commands. **Complete**
 10. Stream draft and fixture updates with reconnect fallback and deploy the private beta.
 11. Publish architecture decisions and interview preparation.
 
