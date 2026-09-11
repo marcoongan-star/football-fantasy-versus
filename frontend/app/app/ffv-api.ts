@@ -64,6 +64,21 @@ export type LeagueRecord = {
 
 export type LeagueCreated = LeagueRecord & { invite_code: string };
 
+export type InviteRotated = {
+  league_id: string;
+  invite_code: string;
+  invite_version: number;
+};
+
+export type AuditEvent = {
+  id: string;
+  event_type: string;
+  actor_user_id: string;
+  subject_user_id: string | null;
+  detail: string;
+  created_at: string;
+};
+
 export type DraftPick = {
   pick_number: number;
   round_number: number;
@@ -179,7 +194,12 @@ const seededWorkspace: LeagueWorkspace = {
     active_member_count: 8,
     invite_enabled: true,
     invite_version: 1,
-    members: [],
+    members: [
+      { user_id: "marco", display_name: "Marco", role: "commissioner", status: "active", joined_at: "2026-08-13T17:00:00Z", removed_at: null },
+      { user_id: "amina", display_name: "Amina", role: "member", status: "active", joined_at: "2026-08-13T17:05:00Z", removed_at: null },
+      { user_id: "jay", display_name: "Jay", role: "member", status: "active", joined_at: "2026-08-13T17:10:00Z", removed_at: null },
+      { user_id: "rosa", display_name: "Rosa", role: "member", status: "active", joined_at: "2026-08-13T17:15:00Z", removed_at: null },
+    ],
   },
   leagueName: "The Gegenpress Society",
   updatedLabel: "Seeded recruiter preview",
@@ -210,8 +230,9 @@ function developmentIdentityHeaders(): Record<string, string> {
   const subject = process.env.NEXT_PUBLIC_FFV_DEMO_USER_ID;
   if (!subject) return {};
   return {
-    "X-User-Id": subject,
-    "X-User-Name": process.env.NEXT_PUBLIC_FFV_DEMO_USER_NAME ?? "Local manager",
+    "X-FFV-User-Id": subject,
+    "X-FFV-User-Email": process.env.NEXT_PUBLIC_FFV_DEMO_USER_EMAIL ?? "local.manager@example.com",
+    "X-FFV-User-Name": process.env.NEXT_PUBLIC_FFV_DEMO_USER_NAME ?? "Local manager",
   };
 }
 
@@ -253,6 +274,34 @@ export function joinLeague(inviteCode: string): Promise<LeagueRecord> {
     method: "POST",
     body: JSON.stringify({ invite_code: inviteCode }),
   });
+}
+
+export function rotateLeagueInvite(leagueId: string): Promise<InviteRotated> {
+  return apiRequest<InviteRotated>(`/v1/leagues/${leagueId}/invite/rotate`, {
+    method: "POST",
+  });
+}
+
+export function revokeLeagueInvite(leagueId: string): Promise<LeagueRecord> {
+  return apiRequest<LeagueRecord>(`/v1/leagues/${leagueId}/invite/revoke`, {
+    method: "POST",
+  });
+}
+
+export function removeLeagueMember(leagueId: string, userId: string): Promise<LeagueRecord> {
+  return apiRequest<LeagueRecord>(`/v1/leagues/${leagueId}/members/${userId}`, {
+    method: "DELETE",
+  });
+}
+
+export function restoreLeagueMember(leagueId: string, userId: string): Promise<LeagueRecord> {
+  return apiRequest<LeagueRecord>(`/v1/leagues/${leagueId}/members/${userId}/restore`, {
+    method: "POST",
+  });
+}
+
+export function loadLeagueAudit(leagueId: string, signal?: AbortSignal): Promise<AuditEvent[]> {
+  return apiRequest<AuditEvent[]>(`/v1/leagues/${leagueId}/audit`, { signal });
 }
 
 export function startDraft(leagueId: string): Promise<DraftState> {
