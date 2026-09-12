@@ -71,7 +71,7 @@ export function LeagueDemo() {
           <a className="nav-link" href="#career">Career H2H</a>
           <a className="nav-link" href="#modes">How it works</a>
         </nav>
-        <button className="button ghost" onClick={() => setShowJoin(true)}>Join a league</button>
+        <a className="button ghost" href="/app">Open league app</a>
       </header>
 
       <section className="hero" id="top">
@@ -86,6 +86,7 @@ export function LeagueDemo() {
             </p>
             <div className="hero-actions">
               <a className="button primary" href="#league">Explore demo league <span>→</span></a>
+              <a className="hero-app-link" href="/app">Enter the workspace</a>
             </div>
           </div>
           <div className="hero-scorecard" aria-label="Career mode result preview">

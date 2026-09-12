@@ -7,9 +7,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .auth import Principal, current_principal
-from .career import CareerPlayer, TeamSheet, simulate_career_match
+from .career import FORMATIONS, CareerPlayer, TeamSheet, simulate_career_match
 from .career_store import career_standings, record_career_match, void_career_match
-from .models import CareerMatch, CareerMatchVoid
+from .models import CareerMatch, CareerMatchVoid, CareerTacticsSelection, utc_now
 from .schemas import (
     CareerMatchView,
     CareerCorrectionView,
@@ -17,6 +17,8 @@ from .schemas import (
     CareerSimulationRequest,
     CareerSimulationResponse,
     CareerStandingView,
+    CareerTacticsInput,
+    CareerTacticsView,
     CareerVoidInput,
     OfficialCareerMatchCreate,
 )
@@ -106,6 +108,71 @@ def install_career_routes(app: FastAPI, session_dependency: SessionDependency) -
             seed=result.seed,
             data_status="Synthetic career simulation — no real match prediction implied.",
         )
+
+    @app.get(
+        "/v1/leagues/{league_id}/career/tactics/{gameweek}",
+        response_model=CareerTacticsView,
+    )
+    def get_career_tactics(
+        league_id: str,
+        gameweek: int,
+        principal: Principal = Depends(current_principal),
+        session: Session = Depends(session_dependency),
+    ) -> CareerTacticsSelection:
+        membership = require_active_member(session, league_id, principal)
+        selection = session.scalar(
+            select(CareerTacticsSelection).where(
+                CareerTacticsSelection.league_id == league_id,
+                CareerTacticsSelection.user_id == membership.user_id,
+                CareerTacticsSelection.gameweek == gameweek,
+            )
+        )
+        if selection is None:
+            raise HTTPException(status_code=404, detail="No tactics saved for this gameweek.")
+        return selection
+
+    @app.post(
+        "/v1/leagues/{league_id}/career/tactics/{gameweek}",
+        response_model=CareerTacticsView,
+    )
+    def save_career_tactics(
+        league_id: str,
+        gameweek: int,
+        payload: CareerTacticsInput,
+        principal: Principal = Depends(current_principal),
+        session: Session = Depends(session_dependency),
+    ) -> CareerTacticsSelection:
+        if gameweek < 1:
+            raise HTTPException(status_code=422, detail="Gameweek must be positive.")
+        if payload.formation not in FORMATIONS:
+            raise HTTPException(status_code=422, detail="Unsupported formation.")
+        with session.begin():
+            membership = require_active_member(session, league_id, principal)
+            selection = session.scalar(
+                select(CareerTacticsSelection).where(
+                    CareerTacticsSelection.league_id == league_id,
+                    CareerTacticsSelection.user_id == membership.user_id,
+                    CareerTacticsSelection.gameweek == gameweek,
+                )
+            )
+            now = utc_now()
+            if selection is None:
+                selection = CareerTacticsSelection(
+                    league_id=league_id,
+                    user_id=membership.user_id,
+                    gameweek=gameweek,
+                    formation=payload.formation,
+                    mentality=payload.mentality.value,
+                    submitted_at=now,
+                    updated_at=now,
+                )
+                session.add(selection)
+            else:
+                selection.formation = payload.formation
+                selection.mentality = payload.mentality.value
+                selection.updated_at = now
+            session.flush()
+        return selection
 
     @app.post(
         "/v1/leagues/{league_id}/career/matches",
