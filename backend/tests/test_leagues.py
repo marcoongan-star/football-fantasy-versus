@@ -164,12 +164,29 @@ def test_local_frontend_origin_can_preflight_authenticated_requests(client: Test
         headers={
             "Origin": "http://localhost:3000",
             "Access-Control-Request-Method": "GET",
-            "Access-Control-Request-Headers": "x-user-id,x-user-name",
+            "Access-Control-Request-Headers": (
+                "x-ffv-user-id,x-ffv-user-name,x-ffv-user-email"
+            ),
         },
     )
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+    allowed_headers = response.headers["access-control-allow-headers"].lower()
+    assert "x-ffv-user-id" in allowed_headers
+    assert "x-ffv-user-name" in allowed_headers
+    assert "x-ffv-user-email" in allowed_headers
+
+
+def test_readiness_checks_database_connectivity(client: TestClient) -> None:
+    response = client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ready",
+        "database": "reachable",
+        "auth_mode": "development",
+    }
 
 
 def test_private_league_and_audit_require_active_membership(client: TestClient) -> None:

@@ -5,7 +5,7 @@ from collections.abc import Generator
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session, selectinload
 
 from .auth import Principal, current_principal
@@ -219,7 +219,12 @@ def create_app(
             allow_origins=allowed_origins,
             allow_credentials=False,
             allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-            allow_headers=["Content-Type", "X-User-Id", "X-User-Name", "X-User-Email"],
+            allow_headers=[
+                "Content-Type",
+                "X-FFV-User-Id",
+                "X-FFV-User-Name",
+                "X-FFV-User-Email",
+            ],
         )
 
     def session_dependency() -> Generator[Session, None, None]:
@@ -237,6 +242,16 @@ def create_app(
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/ready")
+    def ready(session: Session = Depends(session_dependency)) -> dict[str, str]:
+        """Confirm that this API instance can reach its source-of-truth database."""
+        session.execute(text("SELECT 1"))
+        return {
+            "status": "ready",
+            "database": "reachable",
+            "auth_mode": app.state.auth_mode,
+        }
 
     @app.get("/v1/me", response_model=UserView)
     def get_viewer(
